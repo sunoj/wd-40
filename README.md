@@ -2,7 +2,7 @@
 
 > Dev artifact cleaner for macOS — menu bar app + CLI.
 
-WD-40 finds and cleans build artifact directories (`target/`, `node_modules/`, `.next/`, `dist/`, `build/`, and `/tmp/cc-target-*`) to reclaim disk space.
+WD-40 finds and cleans validated build output and developer caches to reclaim disk space.
 
 ## Two Ways to Use
 
@@ -12,7 +12,7 @@ A native macOS status bar utility with zero-config scanning.
 
 - **Visual Status**: Icon gets "rustier" as build artifacts grow
 - **Disk Panel**: Free space is the headline number, over a capacity gauge that shows the artifact slice in orange and what cleaning it would leave
-- **Grouped Results**: Rust, Node Modules, Build Output — every group keeps rows of its own, with aligned size columns and usage bars
+- **Grouped Results**: Rust, Node Modules, Build Output, Caches, and Toolchains — every group keeps rows of its own, with aligned size columns and usage bars
 - **Readable Names**: The name column sizes itself to the projects on screen, and same-named projects gain the directory that tells them apart
 - **Hover for the Path**: Pointing at a row swaps the short name for its full path and how stale it is
 - **One-Click Clean**: Individual projects, by group, all, or old only
@@ -48,7 +48,7 @@ Total: 4.3G in 17 targets
 | `wd40` / `wd40 scan` | Scan and display all artifacts |
 | `wd40 clean` | Remove all artifact directories |
 | `wd40 clean-old` | Remove artifacts older than N days |
-| `wd40 scan -g rust` | Filter by group: `rust`, `node`, `build` |
+| `wd40 scan -g rust` | Filter by group: `rust`, `node`, `build`, `caches` |
 | `wd40 clean-old -d 14` | Custom age threshold |
 | `wd40 clean --dry-run` | Preview without deleting |
 
@@ -73,21 +73,46 @@ Enable **Launch at Login** from the Settings window; it installs the
 
 ```toml
 scan_dirs = ["/Users/username/Develop"]
-artifact_types = ["target", "node_modules", ".next", "dist", "build"]
 max_age_days = 7
-max_depth = 5
+max_depth = 8
 auto_clean_hours = 6   # 0 to disable
+scan_groups = ["rust", "node_modules", "build_output", "caches", "toolchains"]
+menu_bar_size = true
 ```
+
+Without a saved config, WD-40 scans every existing `~/Develop`, `~/Developer`,
+`~/Projects`, `~/projects`, `~/code`, `~/Code`, `~/src`, `~/dev`,
+`~/workspace`, `~/repos`, `~/GitHub`, and `~/Documents/GitHub` (deduplicated
+by canonical path, ignoring case). If none exists, it falls back to `~/Develop`.
+Saved configs keep their existing roots and depth.
 
 ## Detection Rules
 
 | Directory | Heuristic |
 |-----------|-----------|
 | `target/` | Contains `debug/` or `release/` |
-| `node_modules/` | Contains `.package-lock.json` or `.yarn-integrity` |
+| `node_modules/` | Parent `package.json` or package manager files/directories inside |
 | `.next/` | Contains `cache/` or `static/` |
-| `dist/`, `build/` | Parent has `package.json`, `Cargo.toml`, `build.gradle`, or `platformio.ini` |
+| `dist/`, `build/` | Project manifest; `build/` also accepts Xcode projects or `CMakeCache.txt` |
+| `.build/`, `.gradle/` | Parent SwiftPM or Gradle manifest |
+| `.turbo/`, `.svelte-kit/`, `.parcel-cache/`, `.nuxt/`, `.angular/` | Parent `package.json` or `angular.json` |
+| `.mypy_cache/`, `.pytest_cache/`, `.ruff_cache/` | Valid `CACHEDIR.TAG` or tool-specific cache files |
+| `.tox/`, `.nox/` | Parent Python test configuration |
+| `zig-cache/`, `.zig-cache/`, `zig-out/`, `.dart_tool/` | Parent `build.zig` or `pubspec.yaml` |
+| `out/`, `artifacts/` | Parent Foundry or Hardhat configuration |
 | `/tmp/cc-target-*` | Auto-detected temporary Cargo build dirs |
+
+The walk enters `.claude/` and `.worktrees/` to find nested checkout artifacts.
+It leaves other hidden directories alone. Generic names like `build/`, `out/`,
+and `artifacts/` are never selected or pruned without their marker.
+Arbitrary `CACHEDIR.TAG` directories are not scanned, since checking every
+directory would add a filesystem probe to the whole walk.
+
+Fixed cache roots include Xcode and CoreSimulator, Cargo registry, Homebrew,
+npm and npx, pnpm, Yarn, pip, uv, Go build, Gradle caches and wrapper downloads,
+Bun, CocoaPods, node-gyp, sccache, and Deno. WD-40 does not offer Go module
+caches, Maven repositories, Playwright browsers, virtual environments, or
+`__pycache__` for deletion.
 
 ## Updates
 
