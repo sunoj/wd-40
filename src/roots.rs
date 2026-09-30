@@ -86,12 +86,29 @@ pub(crate) fn collect_toolchains(found: &mut Vec<TargetDir>, scan_dirs: &[PathBu
 
 pub(crate) fn collect_dev_caches(found: &mut Vec<TargetDir>) {
     let Some(home) = dirs::home_dir() else { return };
+    collect_home_caches(found, &home);
+}
+
+fn collect_home_caches(found: &mut Vec<TargetDir>, home: &Path) {
     for path in [
         home.join("Library/Developer/Xcode/DerivedData"),
         home.join("Library/Developer/Xcode/ModuleCache.noindex"),
         home.join("Library/Caches/org.swift.swiftpm"),
         home.join("Library/Caches/com.apple.dt.Xcode"),
         home.join("Library/Caches/Homebrew"),
+        home.join("Library/Caches/pip"),
+        home.join(".cache/uv"),
+        home.join("Library/Caches/uv"),
+        home.join("Library/Caches/go-build"),
+        home.join(".gradle/caches"),
+        home.join(".gradle/wrapper/dists"),
+        home.join(".bun/install/cache"),
+        home.join("Library/Caches/CocoaPods"),
+        home.join("Library/Caches/node-gyp"),
+        home.join("Library/Caches/Mozilla.sccache"),
+        home.join("Library/Caches/deno"),
+        home.join(".npm/_npx"),
+        home.join("Library/Developer/CoreSimulator/Caches"),
         // ~/.npm is npm's cache *root*, but it also holds _logs and npx state.
         // Only the content-addressable store is safe to drop wholesale.
         home.join(".npm/_cacache"),
@@ -108,7 +125,10 @@ pub(crate) fn collect_dev_caches(found: &mut Vec<TargetDir>) {
             push_dir(found, path, ArtifactKind::Cache);
         }
     }
+    collect_dynamic_caches(found, home);
+}
 
+fn collect_dynamic_caches(found: &mut Vec<TargetDir>, home: &Path) {
     collect_xcode_device_support(found, &home.join("Library/Developer/Xcode"));
 
     // Cargo's downloads: the .crate tarballs, the sources unpacked from them and
@@ -160,7 +180,7 @@ fn modified(path: &Path) -> SystemTime {
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_xcode_device_support, is_tmp_target_name};
+    use super::{collect_home_caches, collect_xcode_device_support, is_tmp_target_name};
     use std::fs;
     use std::path::PathBuf;
 
@@ -189,5 +209,32 @@ mod tests {
         assert!(paths.contains(&xcode.join("watchOS DeviceSupport")));
         assert!(!paths.contains(&xcode.join("Archives")));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn fixed_cache_roots_require_their_exact_path() {
+        let home = std::env::temp_dir().join(format!("wd40-cache-roots-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&home);
+        fs::create_dir_all(&home).unwrap();
+        let paths = [
+            "Library/Caches/pip", ".cache/uv", "Library/Caches/uv",
+            "Library/Caches/go-build", ".gradle/caches", ".gradle/wrapper/dists",
+            ".bun/install/cache", "Library/Caches/CocoaPods", "Library/Caches/node-gyp",
+            "Library/Caches/Mozilla.sccache", "Library/Caches/deno", ".npm/_npx",
+            "Library/Developer/CoreSimulator/Caches",
+        ];
+        let mut found = Vec::new();
+        collect_home_caches(&mut found, &home);
+        assert!(!found.iter().any(|item| item.path.starts_with(&home)));
+        for relative in paths {
+            fs::create_dir_all(home.join(relative)).unwrap();
+            fs::create_dir_all(home.join("elsewhere").join(relative)).unwrap();
+        }
+        collect_home_caches(&mut found, &home);
+        for relative in paths {
+            assert!(found.iter().any(|item| item.path == home.join(relative)), "{relative}");
+        }
+        assert_eq!(found.iter().filter(|item| item.path.starts_with(&home)).count(), paths.len());
+        fs::remove_dir_all(home).unwrap();
     }
 }

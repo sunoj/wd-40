@@ -12,6 +12,7 @@ pub mod nesting;
 pub mod qos;
 pub mod reclaim;
 pub mod roots;
+mod rules;
 pub mod scanner;
 pub mod sizes;
 pub mod toolchains;

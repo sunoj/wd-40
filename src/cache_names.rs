@@ -14,6 +14,19 @@ const KNOWN: &[(&str, &str)] = &[
     ("Library/Caches/org.swift.swiftpm", "SwiftPM cache"),
     ("Library/Caches/com.apple.dt.Xcode", "Xcode cache"),
     ("Library/Caches/Homebrew", "Homebrew downloads"),
+    ("Library/Caches/pip", "pip cache"),
+    (".cache/uv", "uv cache"),
+    ("Library/Caches/uv", "uv cache"),
+    ("Library/Caches/go-build", "Go build cache"),
+    (".gradle/caches", "Gradle cache"),
+    (".gradle/wrapper/dists", "Gradle distributions"),
+    (".bun/install/cache", "Bun cache"),
+    ("Library/Caches/CocoaPods", "CocoaPods cache"),
+    ("Library/Caches/node-gyp", "node-gyp cache"),
+    ("Library/Caches/Mozilla.sccache", "sccache"),
+    ("Library/Caches/deno", "Deno cache"),
+    (".npm/_npx", "npx cache"),
+    ("Library/Developer/CoreSimulator/Caches", "CoreSimulator cache"),
     ("var/homebrew/cache", "Homebrew downloads"),
     (".local/share/pnpm/store", "pnpm store"),
     ("Library/pnpm/store", "pnpm store"),
@@ -129,6 +142,18 @@ mod tests {
             Some("Xcode iOS DeviceSupport")
         );
         assert_eq!(cache_label(Path::new("/Users/x/Develop/thing")), None);
+        for (path, label) in [
+            ("Library/Caches/pip", "pip cache"), (".cache/uv", "uv cache"),
+            ("Library/Caches/uv", "uv cache"), ("Library/Caches/go-build", "Go build cache"),
+            (".gradle/caches", "Gradle cache"), (".gradle/wrapper/dists", "Gradle distributions"),
+            (".bun/install/cache", "Bun cache"), ("Library/Caches/CocoaPods", "CocoaPods cache"),
+            ("Library/Caches/node-gyp", "node-gyp cache"),
+            ("Library/Caches/Mozilla.sccache", "sccache"), ("Library/Caches/deno", "Deno cache"),
+            (".npm/_npx", "npx cache"),
+            ("Library/Developer/CoreSimulator/Caches", "CoreSimulator cache"),
+        ] {
+            assert_eq!(cache_label(&Path::new("/Users/x").join(path)).as_deref(), Some(label));
+        }
     }
 
     #[test]
