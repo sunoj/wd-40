@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.5] — 2026-09-30
+
+### Changed
+- **Sizing reads each directory once** (`src/bulk.rs`, `src/sizes.rs`): the `getattrlistbulk` crate ignored the entry count the syscall returns and parsed the whole buffer, so a refill shorter than the one before replayed stale entries. Every directory was therefore read a second time with `readdir` to check it. The syscall is now called directly and exactly the returned records are parsed; a mount point, or anything inconsistent, falls back to the standard reader. Sizing the same 57 targets went from 3.0 s to 1.85 s (median of five), byte-for-byte identical. The crate is gone.
+
+### Added
+- **More of what a developer's Mac regenerates** (`src/rules.rs`, `src/roots.rs`, `src/cache_names.rs`): pip, uv, Go build, Gradle, Bun, CocoaPods, node-gyp, sccache, Deno and npx caches, and CoreSimulator's cache. In projects, each gated on its own marker: `.gradle`, `.turbo`, `.svelte-kit`, `.parcel-cache`, `.nuxt`, `.angular`, `.mypy_cache`/`.pytest_cache`/`.ruff_cache` (only with a valid `CACHEDIR.TAG`), `.tox`, `.nox`, Zig caches, `.dart_tool`, Foundry `out/`, Hardhat `artifacts/`, and a CMake `build/`. Virtual environments, Go's module cache, `~/.m2` and Playwright browsers are deliberately not offered.
+- **Checkouts under `.claude/worktrees` and `.worktrees` are walked**, and a cargo target holding only cross-compiled output is recognised by the `CACHEDIR.TAG` and `.rustc_info.json` cargo writes at its root.
+- **Default roots and depth** (`src/config.rs`): every existing one of `~/Develop`, `~/Developer`, `~/Projects`, `~/code`, `~/src`, `~/dev`, `~/workspace`, `~/repos`, `~/GitHub`, `~/Documents/GitHub`, at depth 8 (settings offers 4/6/8/10). A saved config keeps its own.
+
+### Fixed
+- **A directory called `build` or `dist` no longer hides what is under it** (`src/discover.rs`): the walk stops only at a directory it has validated as an artifact, including one in a group that is switched off. Findings from overlapping roots are listed once.
+- **A Cargo manifest alone no longer makes `build/` or `dist/` an artifact** (`src/rules.rs`): Cargo writes neither, and crates keep build scripts in `build/`. Trunk's `dist/` is still found through `Trunk.toml`.
+
 ## [0.6.4] — 2026-08-14
 
 ### Changed

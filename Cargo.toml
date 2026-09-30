@@ -1,6 +1,6 @@
 [package]
 name = "wd40"
-version = "0.6.4"
+version = "0.6.5"
 edition = "2021"
 description = "WD-40 — find and clean dev build artifacts (target/, node_modules/, .next/, dist/, build/) on macOS"
 license = "MIT"
