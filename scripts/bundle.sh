@@ -9,7 +9,9 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
 VERSION="${WD40_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)}"
-BUILD="${WD40_BUILD:-1}"
+# Sparkle orders builds by this number, not by VERSION. A local build numbered
+# 1 is older than every published one, so the feed offered it a downgrade.
+BUILD="${WD40_BUILD:-$(date +%Y%m%d%H%M)}"
 APP_DIR="dist/WD-40.app"
 CONTENTS="$APP_DIR/Contents"
 CARGO_OUT="${CARGO_TARGET_DIR:-target}/release"
