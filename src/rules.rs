@@ -15,7 +15,9 @@ pub(crate) fn is_dev_artifact(path: &Path, name: &str) -> bool {
         ".next" => path.join("cache").is_dir() || path.join("static").is_dir(),
         "build" => is_build_project(parent) || has_xcodeproj(parent)
             || path.join("CMakeCache.txt").is_file(),
-        "dist" => is_build_project(parent),
+        // Trunk is the one Cargo tool that writes dist/; Cargo itself never
+        // writes build/ or dist/, and crates keep build scripts in build/.
+        "dist" => is_build_project(parent) || parent.join("Trunk.toml").is_file(),
         ".build" => parent.join("Package.swift").is_file(),
         ".gradle" => has_any(parent, &["build.gradle", "build.gradle.kts",
             "settings.gradle", "settings.gradle.kts"]),
@@ -39,7 +41,7 @@ fn has_any(parent: &Path, names: &[&str]) -> bool {
 
 fn is_build_project(parent: &Path) -> bool {
     has_any(parent, &[
-        "package.json", "Cargo.toml", "build.gradle", "build.gradle.kts",
+        "package.json", "build.gradle", "build.gradle.kts",
         "platformio.ini",
     ])
 }
@@ -155,6 +157,21 @@ mod tests {
             fs::write(project.join(marker), "").unwrap();
             assert!(!is_dev_artifact(&artifact, name), "{name} with only {marker}");
         }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_cargo_manifest_alone_marks_neither_build_nor_dist() {
+        let root = std::env::temp_dir().join(format!("wd40-cargo-build-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("build")).unwrap();
+        fs::create_dir_all(root.join("dist")).unwrap();
+        fs::write(root.join("build/build.rs"), "fn main() {}").unwrap();
+        fs::write(root.join("Cargo.toml"), "[package]").unwrap();
+        assert!(!is_dev_artifact(&root.join("build"), "build"));
+        assert!(!is_dev_artifact(&root.join("dist"), "dist"));
+        fs::write(root.join("Trunk.toml"), "").unwrap();
+        assert!(is_dev_artifact(&root.join("dist"), "dist"));
         fs::remove_dir_all(root).unwrap();
     }
 
