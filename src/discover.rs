@@ -1,7 +1,6 @@
 // Phase 1 of a scan: find artifact directories without measuring them.
-// Fast (<1s) because it never descends into an artifact, and because the roots
-// that live under dot-directories are collected by name instead of walked.
-// Exports: `scan_discover`. Deps: walkdir, crate::{config, roots, scanner}.
+// Fast because it never descends into a validated artifact; dot-dir roots are
+// collected by name. Exports: `scan_discover`. Deps: walkdir, crate::{config, roots, rules, scanner}.
 
 use crate::config::{Config, ARTIFACT_DIRS};
 use crate::roots;
