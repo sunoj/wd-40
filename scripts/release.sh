@@ -156,6 +156,15 @@ fi
 # nothing here looked; the uploads are not transactional, so a bad one is live.
 ./scripts/verify-release.sh "$OUT_DIR/$ZIP" "$OUT_DIR/$DMG"
 
+# Both archives are cut from this stapled app, so its tree is what they carry.
+# The credential scanner reads directories, not archive bytes.
+GUARD="${SECURITY_GUARD:-$HOME/.local/bin/security-guard}"
+if [[ ! -x "$GUARD" ]]; then
+  printf 'ERROR: credential scanner %s not found; nothing uploaded\n' "$GUARD" >&2
+  exit 1
+fi
+"$GUARD" artifact "$ROOT_DIR/$APP" --repo "$ROOT_DIR"
+
 curl -fsS -X PUT "$RELAY/$ZIP" \
   -H "authorization: Bearer $UPLOAD_SECRET" \
   -H "content-type: application/zip" \
