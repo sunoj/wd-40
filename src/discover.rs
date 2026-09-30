@@ -36,13 +36,14 @@ pub fn walk_types(config: &Config) -> Vec<&str> {
 /// Discover artifact directories. Sizes are all zero on return.
 pub fn scan_discover(config: &Config) -> Vec<TargetDir> {
     let types = walk_types(config);
-    let roots: Vec<_> = config.scan_dirs.iter()
-        .filter_map(|dir| dir.canonicalize().ok().map(|path| (dir, path))).collect();
-    let dirs: Vec<_> = roots.iter().enumerate()
-        .filter(|(i, (_, path))| !types.is_empty() && !roots.iter().enumerate()
-            .any(|(j, (_, other))| i != &j && path.starts_with(other)
-                && (path != other || j < *i)))
-        .map(|(_, (dir, _))| *dir).collect();
+    // Nested roots are walked too (the outer walk may not reach them); dedupe is below.
+    let mut seen_roots = HashSet::new();
+    let dirs: Vec<&PathBuf> = match types.is_empty() {
+        true => Vec::new(),
+        false => config.scan_dirs.iter()
+            .filter(|dir| dir.canonicalize().is_ok_and(|path| seen_roots.insert(path)))
+            .collect(),
+    };
     let mut found: Vec<TargetDir> = std::thread::scope(|scope| {
         let handles: Vec<_> = dirs
             .iter()
