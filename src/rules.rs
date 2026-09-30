@@ -21,10 +21,9 @@ pub(crate) fn is_dev_artifact(path: &Path, name: &str) -> bool {
             "settings.gradle", "settings.gradle.kts"]),
         ".turbo" | ".svelte-kit" | ".parcel-cache" | ".nuxt" => parent.join("package.json").is_file(),
         ".angular" => parent.join("angular.json").is_file(),
-        ".mypy_cache" | ".pytest_cache" | ".ruff_cache" => {
-            has_cache_tag(path) || has_python_cache_files(path, name)
-        }
-        ".tox" | ".nox" => has_any(parent, &["tox.ini", "noxfile.py", "pyproject.toml"]),
+        ".mypy_cache" | ".pytest_cache" | ".ruff_cache" => has_cache_tag(path),
+        ".tox" => has_any(parent, &["tox.ini", "tox.toml"]),
+        ".nox" => parent.join("noxfile.py").is_file(),
         "zig-cache" | ".zig-cache" | "zig-out" => parent.join("build.zig").is_file(),
         ".dart_tool" => parent.join("pubspec.yaml").is_file(),
         "out" => parent.join("foundry.toml").is_file(),
@@ -41,7 +40,7 @@ fn has_any(parent: &Path, names: &[&str]) -> bool {
 fn is_build_project(parent: &Path) -> bool {
     has_any(parent, &[
         "package.json", "Cargo.toml", "build.gradle", "build.gradle.kts",
-        "settings.gradle", "settings.gradle.kts", "platformio.ini",
+        "platformio.ini",
     ])
 }
 
@@ -65,21 +64,6 @@ fn has_cache_tag(path: &Path) -> bool {
         })
 }
 
-fn has_python_cache_files(path: &Path, name: &str) -> bool {
-    if name == ".pytest_cache" {
-        return has_any(&path.join("v/cache"), &["nodeids", "lastfailed", "stepwise"]);
-    }
-    // mypy and Ruff store entries under version-numbered subdirectories.
-    let Ok(entries) = std::fs::read_dir(path) else { return false };
-    entries.filter_map(Result::ok).any(|entry| {
-        entry.file_name().to_string_lossy().starts_with(|c: char| c.is_ascii_digit())
-            && entry.file_type().is_ok_and(|kind| kind.is_dir())
-            && std::fs::read_dir(entry.path()).is_ok_and(|mut files| {
-                files.any(|file| file.is_ok_and(|file| file.file_type().is_ok_and(|kind| kind.is_file())))
-            })
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::is_dev_artifact;
@@ -90,13 +74,13 @@ mod tests {
         let root = std::env::temp_dir().join(format!("wd40-rules-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         for (index, (name, marker)) in [
-            (".gradle", "build.gradle.kts"), ("build", "settings.gradle.kts"),
+            (".gradle", "build.gradle.kts"), ("build", "build.gradle"),
             (".turbo", "package.json"), (".svelte-kit", "package.json"),
             (".parcel-cache", "package.json"), (".nuxt", "package.json"),
             (".angular", "angular.json"), (".mypy_cache", ".mypy_cache/CACHEDIR.TAG"),
             (".pytest_cache", ".pytest_cache/CACHEDIR.TAG"),
             (".ruff_cache", ".ruff_cache/CACHEDIR.TAG"),
-            (".tox", "tox.ini"), (".nox", "noxfile.py"),
+            (".tox", "tox.ini"), (".tox", "tox.toml"), (".nox", "noxfile.py"),
             ("zig-cache", "build.zig"), (".zig-cache", "build.zig"),
             ("zig-out", "build.zig"), (".dart_tool", "pubspec.yaml"),
             ("out", "foundry.toml"), ("artifacts", "hardhat.config.cjs"),
@@ -131,7 +115,7 @@ mod tests {
             let path = root.join(name);
             fs::create_dir_all(path.join(file).parent().unwrap()).unwrap();
             fs::write(path.join(file), "").unwrap();
-            assert!(is_dev_artifact(&path, name));
+            assert!(!is_dev_artifact(&path, name), "{name} without CACHEDIR.TAG");
         }
         fs::remove_dir_all(root).unwrap();
     }
@@ -142,9 +126,9 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         for (index, (name, marker)) in [
             (".gradle", "settings.gradle"), (".gradle", "settings.gradle.kts"),
-            ("build", "build.gradle.kts"), ("build", "settings.gradle"),
+            ("build", "build.gradle.kts"),
             ("artifacts", "hardhat.config.js"), ("artifacts", "hardhat.config.ts"),
-            ("artifacts", "hardhat.config.mjs"), (".tox", "pyproject.toml"),
+            ("artifacts", "hardhat.config.mjs"),
         ].iter().enumerate() {
             let project = root.join(index.to_string());
             let artifact = project.join(name);
@@ -152,6 +136,24 @@ mod tests {
             assert!(!is_dev_artifact(&artifact, name));
             fs::write(project.join(marker), "").unwrap();
             assert!(is_dev_artifact(&artifact, name));
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn removed_project_markers_do_not_qualify() {
+        let root = std::env::temp_dir().join(format!("wd40-rule-rejected-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        for (index, (name, marker)) in [
+            ("build", "settings.gradle"), ("build", "settings.gradle.kts"),
+            (".tox", "pyproject.toml"), (".tox", "noxfile.py"),
+            (".nox", "pyproject.toml"), (".nox", "tox.ini"), (".nox", "tox.toml"),
+        ].iter().enumerate() {
+            let project = root.join(index.to_string());
+            let artifact = project.join(name);
+            fs::create_dir_all(&artifact).unwrap();
+            fs::write(project.join(marker), "").unwrap();
+            assert!(!is_dev_artifact(&artifact, name), "{name} with only {marker}");
         }
         fs::remove_dir_all(root).unwrap();
     }

@@ -7,6 +7,7 @@ use crate::config::{Config, ARTIFACT_DIRS};
 use crate::roots;
 use crate::rules::is_dev_artifact;
 use crate::scanner::{ArtifactGroup, ArtifactKind, TargetDir};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use walkdir::{DirEntry, WalkDir};
@@ -23,8 +24,7 @@ const SKIP_DIRS: &[&str] = &[
     "Volumes",
 ];
 
-/// Built-in directory names to match, once the groups the user switched off
-/// are taken out.
+/// Built-in directory names for enabled groups.
 pub fn walk_types(config: &Config) -> Vec<&str> {
     ARTIFACT_DIRS
         .iter()
@@ -36,11 +36,13 @@ pub fn walk_types(config: &Config) -> Vec<&str> {
 /// Discover artifact directories. Sizes are all zero on return.
 pub fn scan_discover(config: &Config) -> Vec<TargetDir> {
     let types = walk_types(config);
-    let dirs: Vec<&PathBuf> = match types.is_empty() {
-        // Nothing the walk could match, so there is nothing to walk for.
-        true => Vec::new(),
-        false => config.scan_dirs.iter().filter(|dir| dir.exists()).collect(),
-    };
+    let roots: Vec<_> = config.scan_dirs.iter()
+        .filter_map(|dir| dir.canonicalize().ok().map(|path| (dir, path))).collect();
+    let dirs: Vec<_> = roots.iter().enumerate()
+        .filter(|(i, (_, path))| !types.is_empty() && !roots.iter().enumerate()
+            .any(|(j, (_, other))| i != &j && path.starts_with(other)
+                && (path != other || j < *i)))
+        .map(|(_, (dir, _))| *dir).collect();
     let mut found: Vec<TargetDir> = std::thread::scope(|scope| {
         let handles: Vec<_> = dirs
             .iter()
@@ -52,8 +54,7 @@ pub fn scan_discover(config: &Config) -> Vec<TargetDir> {
             .collect();
         handles.into_iter().flat_map(|handle| handle.join().unwrap_or_default()).collect()
     });
-    // The roots below are collected by name rather than walked for, so each one
-    // has to be gated on its own group here.
+    // Name-collected roots still need their own group gate.
     if config.scans(ArtifactGroup::Rust) {
         roots::collect_tmp_targets(&mut found);
         roots::collect_shared_cargo_target(&mut found);
@@ -65,6 +66,8 @@ pub fn scan_discover(config: &Config) -> Vec<TargetDir> {
     if config.scans(ArtifactGroup::Toolchains) {
         roots::collect_toolchains(&mut found, &config.scan_dirs, config.max_depth);
     }
+    let mut seen = HashSet::new();
+    found.retain(|item| item.path.canonicalize().is_ok_and(|path| seen.insert(path)));
     found
 }
 
@@ -81,10 +84,13 @@ fn walk(dir: &Path, types: &[&str], max_depth: usize) -> Vec<TargetDir> {
             continue;
         }
         let name = entry.file_name().to_string_lossy();
-        if !types.contains(&name.as_ref()) || !is_dev_artifact(entry.path(), &name) {
+        if !ARTIFACT_DIRS.contains(&name.as_ref()) || !is_dev_artifact(entry.path(), &name) {
             continue;
         }
         walker.skip_current_dir();
+        if !types.contains(&name.as_ref()) {
+            continue;
+        }
         let kind = ArtifactKind::for_dir_name(name.as_ref());
         let last_modified = entry
             .metadata()
@@ -265,6 +271,30 @@ mod tests {
         let found = scan_discover(&config);
         assert!(found.iter().any(|item| item.path == build));
         assert!(!found.iter().any(|item| item.path == build.join("target")));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn overlapping_symlink_roots_find_target_once() {
+        let root = temp_dir("overlapping-roots");
+        let a = root.join("A");
+        let b = root.join("B");
+        let target = a.join("apps/x/target");
+        fs::create_dir_all(target.join("debug")).unwrap();
+        std::os::unix::fs::symlink(a.join("apps"), &b).unwrap();
+        let config = Config { scan_dirs: vec![a, b], scan_groups: vec!["rust".into()], ..Config::default() };
+        assert_eq!(scan_discover(&config).iter().filter(|item| item.path == target).count(), 1);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn disabled_artifacts_still_prune_nested_targets() {
+        let root = temp_dir("disabled-prune");
+        let nested = root.join("node_modules/pkg/target");
+        fs::create_dir_all(nested.join("debug")).unwrap();
+        fs::write(root.join("package.json"), "{}").unwrap();
+        let config = Config { scan_dirs: vec![root.clone()], scan_groups: vec!["rust".into()], ..Config::default() };
+        assert!(!scan_discover(&config).iter().any(|item| item.path.starts_with(&root)));
         cleanup(&root);
     }
 }
