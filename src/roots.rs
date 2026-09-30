@@ -7,9 +7,13 @@ use crate::scanner::{ArtifactKind, TargetDir};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-/// A cargo target dir always has something built in it.
+/// A cargo target dir always has something built in it. One that only holds
+/// cross-compiled output (`<triple>/release`) is known by the two files cargo
+/// writes at every target root instead.
 pub(crate) fn is_cargo_target(path: &Path) -> bool {
-    path.join("debug").is_dir() || path.join("release").is_dir()
+    path.join("debug").is_dir()
+        || path.join("release").is_dir()
+        || (path.join("CACHEDIR.TAG").is_file() && path.join(".rustc_info.json").is_file())
 }
 
 /// Collect /tmp Cargo target dirs.
@@ -209,6 +213,18 @@ mod tests {
         assert!(paths.contains(&xcode.join("watchOS DeviceSupport")));
         assert!(!paths.contains(&xcode.join("Archives")));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_cross_compiled_target_is_known_by_its_root_markers() {
+        let target = std::env::temp_dir().join(format!("wd40-triple-target-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&target);
+        fs::create_dir_all(target.join("aarch64-apple-darwin/release")).unwrap();
+        fs::write(target.join("CACHEDIR.TAG"), "Signature: 8a477f597d28d172789f06886806bc55\n").unwrap();
+        assert!(!super::is_cargo_target(&target));
+        fs::write(target.join(".rustc_info.json"), "{}").unwrap();
+        assert!(super::is_cargo_target(&target));
+        let _ = fs::remove_dir_all(target);
     }
 
     #[test]
