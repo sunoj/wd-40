@@ -1,32 +1,18 @@
 // Directory sizing for WD-40. A bounded pool walks every target concurrently,
 // handing each size back as soon as it is final.
 // Exports: `SizedTarget`, `size_targets`, `scan_sizes`, directory measurement.
-// Deps: getattrlistbulk, walkdir, crate::{disk, nesting, scanner, walk}.
+// Deps: walkdir, crate::{bulk, disk, nesting, scanner, walk}.
 use crate::disk::disk_space;
 use crate::nesting::Publisher;
 use crate::scanner::TargetDir;
 use crate::cache;
 use crate::walk::Walk;
-use getattrlistbulk::{DirReader, ObjectType, RequestedAttributes};
-use std::collections::{HashMap, HashSet};
-use std::ffi::{OsStr, OsString};
+use std::collections::HashMap;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::SystemTime;
 use walkdir::WalkDir;
-const BULK_ATTRS: RequestedAttributes = RequestedAttributes {
-    name: true,
-    object_type: true,
-    size: true,
-    alloc_size: true,
-    modified_time: true,
-    permissions: false,
-    inode: false,
-    entry_count: false,
-};
-const BULK_BUF: usize = 256 * 1024;
-
 /// A target whose size is settled: anything nested inside it has already been
 /// subtracted, so this figure is never revised.
 pub struct SizedTarget {
@@ -156,48 +142,10 @@ pub fn measure_dir_with_modified(path: &Path) -> Measurement {
 }
 
 pub(crate) fn read_dir(dir: &Path) -> Found {
-    let Some(mut expected_names) = standard_entry_names(dir) else { return broken() };
-    read_dir_bulk(dir, &mut expected_names)
-        .filter(|_| expected_names.is_empty())
-        .unwrap_or_else(|| read_dir_standard(dir))
+    crate::bulk::read_dir(dir, crate::bulk::BUFFER_SIZE).unwrap_or_else(|| read_dir_standard(dir))
 }
 
-fn read_dir_bulk(dir: &Path, expected_names: &mut HashSet<OsString>) -> Option<Found> {
-    let entries = DirReader::new(dir)
-        .attributes(BULK_ATTRS)
-        .buffer_size(BULK_BUF)
-        .follow_symlinks(false)
-        .read()
-        .ok()?;
-    let mut found = empty_found(dir)?;
-    for entry in entries {
-        let entry = entry.ok()?;
-        if !expected_names.remove(OsStr::new(&entry.name)) {
-            return None;
-        }
-        let modified = entry.modified_time?;
-        found.entry_count += 1;
-        found.last_modified = found.last_modified.max(Some(modified));
-        match entry.object_type {
-            Some(ObjectType::Directory) => found.subdirs.push(dir.join(&entry.name)),
-            Some(ObjectType::Symlink) => {}
-            _ => {
-                let bytes = entry.alloc_size.or(entry.size).unwrap_or(0);
-                found.bytes = found.bytes.saturating_add(bytes);
-            }
-        }
-    }
-    Some(found)
-}
-
-fn standard_entry_names(dir: &Path) -> Option<HashSet<OsString>> {
-    std::fs::read_dir(dir)
-        .ok()?
-        .map(|entry| entry.ok().map(|entry| entry.file_name()))
-        .collect()
-}
-
-fn read_dir_standard(dir: &Path) -> Found {
+pub(crate) fn read_dir_standard(dir: &Path) -> Found {
     let Some(mut found) = empty_found(dir) else { return broken() };
     let Ok(entries) = std::fs::read_dir(dir) else { return broken() };
     for entry in entries {
