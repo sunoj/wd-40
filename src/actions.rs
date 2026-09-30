@@ -200,7 +200,8 @@ mod tests {
         assert_eq!(settings_view::active_disclosure(), None);
         assert_eq!(settings_view::interval_for_tag(settings_view::TAG_INTERVAL_BASE + 12), Some(12));
         assert_eq!(settings_view::interval_for_tag(12), None);
-        assert_eq!(settings_view::depth_for_tag(settings_view::TAG_DEPTH_BASE + 5), Some(5));
+        assert_eq!(settings_view::depth_for_tag(settings_view::TAG_DEPTH_BASE + 8), Some(8));
+        assert_eq!(settings_view::depth_for_tag(settings_view::TAG_DEPTH_BASE + 5), None);
         assert_eq!(settings_view::depth_for_tag(5), None);
     }
 }

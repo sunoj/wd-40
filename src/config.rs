@@ -6,7 +6,12 @@ use std::fs;
 use std::path::PathBuf;
 
 /// Directory names recognized as cleanable dev artifacts.
-pub const ARTIFACT_DIRS: &[&str] = &["target", "node_modules", ".next", "dist", "build", ".build"];
+pub const ARTIFACT_DIRS: &[&str] = &[
+    "target", "node_modules", ".next", "dist", "build", ".build",
+    ".gradle", ".turbo", ".svelte-kit", ".parcel-cache", ".nuxt", ".angular",
+    ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", ".nox",
+    "zig-cache", ".zig-cache", "zig-out", ".dart_tool", "out", "artifacts",
+];
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(default)]
@@ -28,7 +33,7 @@ impl Default for Config {
         Self {
             scan_dirs: default_scan_dirs(),
             max_age_days: 7,
-            max_depth: 5,
+            max_depth: 8,
             auto_clean_hours: 0,
             scan_groups: ArtifactGroup::ALL.iter().map(|g| g.key().to_string()).collect(),
             menu_bar_size: true,
@@ -80,16 +85,28 @@ impl Config {
 }
 
 fn default_scan_dirs() -> Vec<PathBuf> {
-    dirs::home_dir()
-        .map(|home| home.join("Develop"))
-        .map(|path| vec![path])
-        .unwrap_or_default()
+    dirs::home_dir().map(|home| scan_dirs_in(&home)).unwrap_or_default()
+}
+
+fn scan_dirs_in(home: &std::path::Path) -> Vec<PathBuf> {
+    const NAMES: &[&str] = &[
+        "Develop", "Developer", "Projects", "projects", "code", "Code",
+        "src", "dev", "workspace", "repos", "GitHub", "Documents/GitHub",
+    ];
+    let mut seen = std::collections::HashSet::new();
+    let dirs: Vec<_> = NAMES.iter().map(|name| home.join(name)).filter(|path| {
+        path.is_dir() && path.canonicalize().is_ok_and(|canonical| {
+            seen.insert(canonical.to_string_lossy().to_lowercase())
+        })
+    }).collect();
+    if dirs.is_empty() { vec![home.join("Develop")] } else { dirs }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
+    use super::{scan_dirs_in, Config};
     use crate::scanner::ArtifactGroup;
+    use std::fs;
 
     #[test]
     fn every_group_is_scanned_by_default() {
@@ -128,5 +145,20 @@ mod tests {
         assert_eq!(config.max_age_days, 3);
         assert!(ArtifactGroup::ALL.iter().all(|group| config.scans(*group)));
         assert!(config.menu_bar_size);
+    }
+
+    #[test]
+    fn defaults_include_existing_roots_once_and_fall_back() {
+        let home = std::env::temp_dir().join(format!("wd40-default-roots-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&home);
+        fs::create_dir_all(&home).unwrap();
+        assert_eq!(scan_dirs_in(&home), vec![home.join("Develop")]);
+        fs::create_dir_all(home.join("Projects")).unwrap();
+        fs::create_dir_all(home.join("Documents")).unwrap();
+        std::os::unix::fs::symlink(home.join("Projects"), home.join("Documents/GitHub")).unwrap();
+        fs::create_dir_all(home.join("code")).unwrap();
+        assert_eq!(scan_dirs_in(&home), vec![home.join("Projects"), home.join("code")]);
+        assert_eq!(Config::default().max_depth, 8);
+        fs::remove_dir_all(home).unwrap();
     }
 }

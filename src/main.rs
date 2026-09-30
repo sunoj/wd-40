@@ -39,7 +39,9 @@ mod selection;
 mod settings_roots;
 mod settings_row;
 mod settings_view;
+mod settings_chrome;
 mod spray;
+mod startup;
 mod state;
 mod style;
 mod tasks;
@@ -50,17 +52,13 @@ mod treemap;
 mod updater;
 mod widgets;
 
-use state::{with_state, with_state_ret, AppState, UiScreen};
+use state::with_state_ret;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{define_class, msg_send, MainThreadOnly};
-use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSButton, NSSlider, NSStatusBar,
-};
+use objc2_app_kit::{NSApplication, NSButton, NSSlider};
 use objc2_foundation::{MainThreadMarker, NSObject};
 use std::cell::RefCell;
-use updater::Updater;
-use wd40::config::Config;
 
 thread_local! {
     pub(crate) static HANDLER: RefCell<Option<Retained<MenuHandler>>> = const { RefCell::new(None) };
@@ -257,51 +255,12 @@ define_class!(
 );
 
 impl MenuHandler {
-    fn new(mtm: MainThreadMarker) -> Retained<Self> {
+    pub(crate) fn new(mtm: MainThreadMarker) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(());
         unsafe { msg_send![super(this), init] }
     }
 }
 
 fn main() {
-    let mtm = MainThreadMarker::new().expect("must run on the main thread");
-    let app = NSApplication::sharedApplication(mtm);
-    app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
-
-    // Force AppKit appearance to match the requested theme so layer-backed
-    // system controls (and our token pick) agree in screenshots.
-    if let Ok(value) = std::env::var("WD40_APPEARANCE") {
-        theme::set_app_appearance(value.eq_ignore_ascii_case("dark"), mtm);
-    }
-
-    let status_item = NSStatusBar::systemStatusBar().statusItemWithLength(-1.0);
-    // Level two first: the scan that starts a moment from now is the one it
-    // exists to spare.
-    wd40::cache::load();
-    let config = Config::load();
-    let auto_hours = config.auto_clean_hours;
-
-    HANDLER.with(|cell| *cell.borrow_mut() = Some(MenuHandler::new(mtm)));
-    state::install(AppState {
-        config,
-        targets: Vec::new(),
-        measured: Default::default(),
-        selected: Default::default(),
-        show_all: false,
-        screen: UiScreen::Scan,
-        cleaning: None,
-        done: None,
-        status_item,
-        updater: Updater::start(),
-        reclaim: None,
-    });
-
-    popover::attach(mtm);
-    tasks::start_scan();
-    tasks::start_auto_scan();
-    if auto_hours > 0 {
-        tasks::start_auto_clean(auto_hours);
-    }
-
-    app.run();
+    startup::run();
 }
