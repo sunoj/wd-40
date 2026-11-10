@@ -82,12 +82,13 @@ fn seed() {
 }
 
 fn bench_targets() -> Vec<TargetDir> {
-    const KINDS: [ArtifactKind; 5] = [
+    const KINDS: [ArtifactKind; 6] = [
         ArtifactKind::RustTarget,
         ArtifactKind::NodeModules,
         ArtifactKind::BuildOutput,
         ArtifactKind::Cache,
         ArtifactKind::Toolchain,
+        ArtifactKind::Simulator,
     ];
     (0..30)
         .map(|i| TargetDir {

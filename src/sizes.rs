@@ -62,6 +62,9 @@ pub fn size_targets(targets: &[TargetDir], on_size: impl Fn(SizedTarget) + Sync)
     let known: Vec<bool> = cached.iter().map(Option::is_some).collect();
     let walk = Walk::new(&paths, &known);
     let remember = |mut sized: SizedTarget| {
+        if matches!(targets[sized.index].kind, crate::scanner::ArtifactKind::Simulator) {
+            sized.last_modified = crate::simulators::file_age(&targets[sized.index].path);
+        }
         sized.last_modified = sized.last_modified.map(|modified| modified.min(SystemTime::now()));
         if let Some(target) = targets.get(sized.index) {
             if let Some(last_modified) = sized.last_modified {
@@ -142,6 +145,9 @@ pub fn measure_dir_with_modified(path: &Path) -> Measurement {
 }
 
 pub(crate) fn read_dir(dir: &Path) -> Found {
+    if crate::simulators::is_device_fs(dir) {
+        return Found { bytes: 0, entry_count: 0, last_modified: None, subdirs: Vec::new(), broken: false };
+    }
     crate::bulk::read_dir(dir, crate::bulk::BUFFER_SIZE).unwrap_or_else(|| read_dir_standard(dir))
 }
 
@@ -181,7 +187,8 @@ fn broken() -> Found {
 
 pub(crate) fn dir_measurement_fallback(path: &Path) -> Measurement {
     let mut measurement = Measurement { bytes: 0, last_modified: None };
-    for entry in WalkDir::new(path).follow_links(false) {
+    for entry in WalkDir::new(path).follow_links(false).into_iter()
+        .filter_entry(|entry| !crate::simulators::is_device_fs(entry.path())) {
         let Ok(entry) = entry else { return incomplete(measurement.bytes) };
         let Ok(metadata) = entry.metadata() else { return incomplete(measurement.bytes) };
         let Ok(modified) = metadata.modified() else { return incomplete(measurement.bytes) };

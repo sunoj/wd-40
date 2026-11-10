@@ -203,7 +203,9 @@ fn print_table(targets: &[TargetDir]) {
                 human_size(t.size_bytes),
                 age_days,
                 t.kind.label(),
-                t.path.display()
+                if matches!(t.kind, wd40::scanner::ArtifactKind::Simulator) {
+                    format!("{}  {}", wd40::simulators::label(&t.path), t.path.display())
+                } else { t.path.display().to_string() }
             );
         }
     }

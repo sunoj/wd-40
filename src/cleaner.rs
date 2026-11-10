@@ -55,6 +55,7 @@ pub fn remove_target(target: &TargetDir) -> Removal {
     }
     crate::cache::forget(&target.path);
     match target.kind {
+        ArtifactKind::Simulator => settle(target, crate::simulators::clean(&target.path).err()),
         ArtifactKind::Toolchain => settle(target, crate::toolchains::uninstall(&target.path).err()),
         _ => settle(target, fs::remove_dir_all(&target.path).err().map(|err| err.to_string())),
     }

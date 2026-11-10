@@ -23,6 +23,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// the app exists to watch is worse than a slow one.
 pub fn ttl(kind: ArtifactKind) -> Duration {
     match kind {
+        ArtifactKind::Simulator => Duration::from_secs(60 * 60),
         ArtifactKind::Toolchain => Duration::from_secs(24 * 60 * 60),
         ArtifactKind::Cache => Duration::from_secs(60 * 60),
         ArtifactKind::NodeModules => Duration::from_secs(10 * 60),
