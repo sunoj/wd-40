@@ -21,14 +21,20 @@ make_tree() {
     /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string $plist_key" "$dir/Info.plist" >/dev/null
   fi
   # shellcheck disable=SC2016 # $1 belongs to the stub, not to this shell
-  if [[ -n "$keychain_key" ]]; then
+  if [[ "$keychain_key" == none ]]; then
+    : # a fresh checkout before Sparkle's tools exist
+  elif [[ -n "$keychain_key" ]]; then
     printf '#!/bin/sh\n[ "$1" = -p ] && echo %s\n' "$keychain_key" > "$dir/.sparkle/bin/generate_keys"
   else
     printf '#!/bin/sh\necho "ERROR: No existing signing key found!"; exit 1\n' > "$dir/.sparkle/bin/generate_keys"
   fi
-  # Reaching the build is the observable effect; stop there.
+  # Reaching the build is the observable effect; stop there. The fetch stub
+  # records that it ran, so the order of fetch and check is observable too.
   printf '#!/bin/sh\ntouch "%s/built"\nexit 3\n' "$dir" > "$dir/scripts/bundle.sh"
-  chmod +x "$dir/scripts/"*.sh "$dir/.sparkle/bin/generate_keys"
+  printf '#!/bin/sh\ntouch "%s/fetched"\n' "$dir" > "$dir/scripts/fetch-sparkle.sh"
+  chmod +x "$dir/scripts/"*.sh
+  [[ -e "$dir/.sparkle/bin/generate_keys" ]] && chmod +x "$dir/.sparkle/bin/generate_keys"
+  return 0
 }
 
 # expect <name> <plist key> <keychain key> <built|stopped> [stderr fragment]
@@ -40,6 +46,7 @@ expect() {
     >"$dir/out" 2>"$dir/err" || true
   local got="stopped"
   [[ -e "$dir/built" ]] && got="built"
+  [[ -e "$dir/fetched" ]] || got="$got without fetching Sparkle"
   if [[ "$got" != "$want" ]] || { [[ -n "$fragment" ]] && ! grep -q "$fragment" "$dir/err"; }; then
     printf 'FAIL  %s: wanted %s, got %s\n' "$name" "$want" "$got"
     sed 's/^/      /' "$dir/err"
@@ -53,6 +60,7 @@ expect() {
 expect "matching key reaches the build" "$TRUSTED" "$TRUSTED" built
 expect "other key stops before the build" "$TRUSTED" "$OTHER" stopped "the app trusts $TRUSTED"
 expect "missing keychain key stops" "$TRUSTED" "" stopped "no Sparkle signing key"
+expect "absent generate_keys names the tool" "$TRUSTED" none stopped "not found or not executable"
 expect "plist without SUPublicEDKey stops" "" "$TRUSTED" stopped "has no SUPublicEDKey"
 
 [[ "$FAILURES" -eq 0 ]] && printf '\nAll checks passed.\n' || exit 1

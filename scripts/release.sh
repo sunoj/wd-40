@@ -58,7 +58,9 @@ fi
 printf 'Signing as %s\n' "$SIGN_IDENTITY"
 
 # 0.7.0 was first published signed by a key no installed copy trusts: every
-# update check failed while each check here passed. Compare before building.
+# update check failed while each check here passed. Compare before building;
+# Sparkle's tools are gitignored, so a fresh checkout fetches them first.
+./scripts/fetch-sparkle.sh >/dev/null
 ./scripts/check-sparkle-key.sh Info.plist "$(dirname "$SIGN_UPDATE")/generate_keys"
 
 # Apple reads a zip of the app; the ticket goes onto the app itself, so both the
