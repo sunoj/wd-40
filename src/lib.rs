@@ -1,5 +1,6 @@
 // WD-40: shared library for dev artifact scanning and cleaning.
 // Used by both the macOS menu bar app and the CLI.
+mod artifact_help;
 pub mod cache;
 mod bulk;
 pub mod cleaner;
@@ -16,6 +17,7 @@ mod rules;
 pub mod scanner;
 pub mod sizes;
 pub mod toolchains;
+pub mod simulators;
 mod walk;
 
 #[cfg(test)]

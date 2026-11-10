@@ -102,6 +102,13 @@ fn toolchains_are_never_auto_clean_candidates() {
 }
 
 #[test]
+fn simulators_are_never_auto_clean_candidates() {
+    let now = SystemTime::now();
+    let targets = vec![target(now, 1000, ArtifactKind::Simulator)];
+    assert!(candidate_indices(&targets, &measured_ages(&targets), &Config::default(), now).is_empty());
+}
+
+#[test]
 fn missing_age_evidence_keeps_an_unattended_target() {
     let now = SystemTime::now();
     let targets = vec![target(now, 30, ArtifactKind::RustTarget)];
