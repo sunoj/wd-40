@@ -4,7 +4,7 @@
 mod tests {
     use crate::config::Config;
     use crate::discover::scan_discover;
-    use crate::roots::{aid_worktrees_scan_root_in, collect_shipit_caches};
+    use crate::roots::collect_shipit_caches;
     use std::fs;
     use std::path::PathBuf;
 
@@ -24,17 +24,6 @@ mod tests {
         let config = Config { scan_dirs: vec![root.clone()], ..Config::default() };
         assert!(scan_discover(&config).iter().any(|item| item.path == node_modules));
         let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn aid_worktrees_scan_root_matches_three_level_layout() {
-        let home = scratch("aid-home");
-        fs::create_dir_all(home.join(".aid/worktrees/wd-40/feat/branch")).unwrap();
-        assert_eq!(
-            aid_worktrees_scan_root_in(&home).as_deref(),
-            Some(home.join(".aid/worktrees").as_path())
-        );
-        let _ = fs::remove_dir_all(home);
     }
 
     #[test]

@@ -107,7 +107,7 @@ fn run(config: Config, stop: &AtomicBool) {
     if stop.load(Ordering::Relaxed) {
         return;
     }
-    let measured_ages = wd40::sizes::scan_sizes(&mut targets);
+    let measured_ages = wd40::sizes::scan_sizes(&mut targets, wd40::qos::Priority::Housekeeping);
     if stop.load(Ordering::Relaxed) {
         return;
     }

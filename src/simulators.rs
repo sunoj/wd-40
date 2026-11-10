@@ -1,5 +1,5 @@
 // CoreSimulator discovery and tool-owned cleanup; never unlink device directories.
-// Exports: collect, label, clean, file_age, is_device_fs. Deps: serde_json, walkdir, std.
+// Exports: collect, label, clean, is_device_fs. Deps: serde_json, std.
 use crate::scanner::{ArtifactKind, TargetDir};
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -86,10 +86,15 @@ fn collect_with(found: &mut Vec<TargetDir>, root: &Path, runner: &mut Runner<'_>
 
 fn runtime_label(runtime: &str) -> String {
     let name = runtime.rsplit('.').next().unwrap_or(runtime);
-    let (platform, version) = name.split_once('-').unwrap_or((name, ""));
-    format!("{platform} {}", version.replace('-', "."))
-        .trim()
-        .to_string()
+    // `iOS-27-2` is iOS 27.2; a device-specific runtime adds `-iPhone19-4`.
+    let mut parts = name.split('-');
+    let platform = parts.next().unwrap_or(name);
+    let rest: Vec<&str> = parts.collect();
+    let numeric = rest.iter().take_while(|part| part.parse::<u32>().is_ok()).count();
+    let version = rest[..numeric].join(".");
+    let suffix = rest[numeric..].join("-");
+    [platform, &version, &suffix].iter().filter(|part| !part.is_empty())
+        .copied().collect::<Vec<_>>().join(" ")
 }
 
 fn valid_udid(udid: &str) -> bool {
@@ -149,27 +154,17 @@ fn clean_with(path: &Path, root: &Path, runner: &mut Runner<'_>) -> Result<(), S
     runner(&["simctl", action, udid]).map(|_| ())
 }
 
-/// Directory mtimes do not establish use; only regular files under data count.
-pub fn file_age(path: &Path) -> Option<SystemTime> {
-    walkdir::WalkDir::new(path.join("data"))
-        .follow_links(false)
-        .into_iter()
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_file())
-        .filter_map(|entry| entry.metadata().ok()?.modified().ok())
-        .max()
-}
-
-/// Reject the virtual device mirror even when a scan root points inside it.
+/// The virtual mirror of booted devices (`CoreDevice/DeviceFS`), or anything
+/// inside it. Decided from the path alone: discovery asks this of every
+/// directory it meets, so it must not cost a syscall.
 pub fn is_device_fs(path: &Path) -> bool {
-    let Some(home) = dirs::home_dir() else {
-        return false;
-    };
-    let mirror = home.join("Library/Developer/CoreDevice/DeviceFS");
-    path.starts_with(&mirror)
-        || path
-            .canonicalize()
-            .is_ok_and(|path| path.starts_with(mirror))
+    let mut previous: Option<&std::ffi::OsStr> = None;
+    path.components().any(|part| {
+        let part = part.as_os_str();
+        let hit = previous == Some(std::ffi::OsStr::new("CoreDevice")) && part == "DeviceFS";
+        previous = Some(part);
+        hit
+    })
 }
 
 #[cfg(test)]

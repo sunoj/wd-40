@@ -99,7 +99,14 @@ fn scan_dirs_in(home: &std::path::Path) -> Vec<PathBuf> {
             seen.insert(canonical.to_string_lossy().to_lowercase())
         })
     }).collect();
-    if dirs.is_empty() { vec![home.join("Develop")] } else { dirs }
+    let mut dirs = if dirs.is_empty() { vec![home.join("Develop")] } else { dirs };
+    // aid keeps its checkouts at <project>/<type>/<desc> under a dot directory
+    // the walk never enters from a parent, so it is a root of its own.
+    let aid = home.join(".aid/worktrees");
+    if aid.is_dir() && !aid.is_symlink() {
+        dirs.push(aid);
+    }
+    dirs
 }
 
 #[cfg(test)]
@@ -159,6 +166,11 @@ mod tests {
         fs::create_dir_all(home.join("code")).unwrap();
         assert_eq!(scan_dirs_in(&home), vec![home.join("Projects"), home.join("code")]);
         assert_eq!(Config::default().max_depth, 8);
+        fs::create_dir_all(home.join(".aid/worktrees/project/feat/branch")).unwrap();
+        assert_eq!(
+            scan_dirs_in(&home),
+            vec![home.join("Projects"), home.join("code"), home.join(".aid/worktrees")]
+        );
         fs::remove_dir_all(home).unwrap();
     }
 }

@@ -6,6 +6,7 @@ mod bulk;
 pub mod cleaner;
 pub mod config;
 pub mod discover;
+mod discover_walk;
 pub mod extent_cache;
 pub mod extents;
 pub mod disk;

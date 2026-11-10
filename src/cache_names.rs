@@ -172,7 +172,7 @@ mod tests {
     #[test]
     fn shipit_caches_are_named_after_their_app() {
         assert_eq!(
-            cache_label(&Path::new("/Users/x/Library/Caches/com.example.App.ShipIt")).as_deref(),
+            cache_label(Path::new("/Users/x/Library/Caches/com.example.App.ShipIt")).as_deref(),
             Some("com.example.App updater cache")
         );
     }

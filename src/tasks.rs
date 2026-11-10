@@ -22,6 +22,7 @@ use std::time::{Instant, SystemTime};
 use wd40::disk::disk_space;
 use wd40::discover::scan_discover;
 use wd40::scanner::TargetDir;
+use wd40::qos::Priority;
 use wd40::sizes::size_targets;
 
 /// How often the app rescans on its own, in seconds. Ten minutes rather than
@@ -192,9 +193,11 @@ pub fn on_scan_done(mtm: MainThreadMarker) {
     popover::refresh(mtm);
     let pending: Vec<TargetDir> =
         with_state_ret(|state| state.targets.clone()).unwrap_or_default();
+    // Someone looking at the popover is waiting on this pass; a timer scan is not.
+    let priority = if popover::is_open() { Priority::Waited } else { Priority::Housekeeping };
     std::thread::spawn(move || {
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            size_targets(&pending, |sized| {
+            size_targets(&pending, priority, |sized| {
                 SIZES.lock().unwrap().push(settled_size(sized));
                 if !SIZE_HOP.swap(true, Ordering::SeqCst) {
                     dispatch_to_main(sizes_tick_trampoline);

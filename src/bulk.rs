@@ -33,6 +33,7 @@ fn read_dir_with_refills(
         bytes: 0,
         entry_count: 0,
         last_modified: Some(modified),
+        newest_file: None,
         subdirs: Vec::new(),
         broken: false,
     };
@@ -152,6 +153,9 @@ fn parse_record(record: &[u8], dir: &Path, found: &mut Found) -> Option<()> {
     let modified = timestamp(seconds, nanos)?;
     found.entry_count = found.entry_count.checked_add(1)?;
     found.last_modified = found.last_modified.max(Some(modified));
+    if kind == 1 {
+        found.newest_file = found.newest_file.max(Some(modified)); // VREG
+    }
     match kind {
         2 => found.subdirs.push(dir.join(name)), // VDIR
         5 => {} // VLNK: count the entry, but not its allocated blocks.

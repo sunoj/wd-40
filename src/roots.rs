@@ -49,18 +49,6 @@ fn is_tmp_target_name(name: &str) -> bool {
     name.starts_with("cc-target-") || name.ends_with("-target") || name.contains("-target-")
 }
 
-/// Extra walk root for aid checkouts (`<project>/<type>/<desc>/…`). The main
-/// scan dirs skip `~/.aid` because dot directories are pruned; default
-/// max_depth 8 reaches `…/<desc>/<subdir>/node_modules` (depth 5).
-pub(crate) fn aid_worktrees_scan_root() -> Option<PathBuf> {
-    dirs::home_dir().and_then(|home| aid_worktrees_scan_root_in(&home))
-}
-
-pub(crate) fn aid_worktrees_scan_root_in(home: &Path) -> Option<PathBuf> {
-    let root = home.join(".aid").join("worktrees");
-    (root.is_dir() && !root.is_symlink()).then_some(root)
-}
-
 /// Collect per-project subdirs under ~/.cargo-target/ (shared CARGO_TARGET_DIR
 /// root). Supports both <project>/debug and <project>/<session>/debug layouts.
 pub(crate) fn collect_shared_cargo_target(found: &mut Vec<TargetDir>) {

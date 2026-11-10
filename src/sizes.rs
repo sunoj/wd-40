@@ -4,6 +4,7 @@
 // Deps: walkdir, crate::{bulk, disk, nesting, scanner, walk}.
 use crate::disk::disk_space;
 use crate::nesting::Publisher;
+use crate::qos::Priority;
 use crate::scanner::TargetDir;
 use crate::cache;
 use crate::walk::Walk;
@@ -30,7 +31,11 @@ pub struct Measurement {
 
 /// Measure every target, calling `on_size` once per target as its size settles.
 /// Indices are positions in `targets`. The callback runs on worker threads.
-pub fn size_targets(targets: &[TargetDir], on_size: impl Fn(SizedTarget) + Sync) {
+pub fn size_targets(
+    targets: &[TargetDir],
+    priority: Priority,
+    on_size: impl Fn(SizedTarget) + Sync,
+) {
     if targets.is_empty() {
         return;
     }
@@ -60,11 +65,12 @@ pub fn size_targets(targets: &[TargetDir], on_size: impl Fn(SizedTarget) + Sync)
     }
 
     let known: Vec<bool> = cached.iter().map(Option::is_some).collect();
-    let walk = Walk::new(&paths, &known);
+    let file_aged: Vec<bool> = targets
+        .iter()
+        .map(|target| matches!(target.kind, crate::scanner::ArtifactKind::Simulator))
+        .collect();
+    let walk = Walk::new(&paths, &known, &file_aged);
     let remember = |mut sized: SizedTarget| {
-        if matches!(targets[sized.index].kind, crate::scanner::ArtifactKind::Simulator) {
-            sized.last_modified = crate::simulators::file_age(&targets[sized.index].path);
-        }
         sized.last_modified = sized.last_modified.map(|modified| modified.min(SystemTime::now()));
         if let Some(target) = targets.get(sized.index) {
             if let Some(last_modified) = sized.last_modified {
@@ -76,8 +82,7 @@ pub fn size_targets(targets: &[TargetDir], on_size: impl Fn(SizedTarget) + Sync)
     std::thread::scope(|scope| {
         for _ in 0..crate::qos::workers() {
             scope.spawn(|| {
-                // Housekeeping: never take the disk away from a build.
-                crate::qos::background();
+                priority.apply();
                 walk.run(&paths, &publisher, &modified, &remember);
             });
         }
@@ -85,10 +90,10 @@ pub fn size_targets(targets: &[TargetDir], on_size: impl Fn(SizedTarget) + Sync)
 }
 
 /// Blocking sizing for callers with nothing to show in the meantime (the CLI).
-pub fn scan_sizes(targets: &mut [TargetDir]) -> HashMap<PathBuf, SystemTime> {
+pub fn scan_sizes(targets: &mut [TargetDir], priority: Priority) -> HashMap<PathBuf, SystemTime> {
     let initial = vec![(0_u64, None); targets.len()];
     let settled = Mutex::new(initial);
-    size_targets(targets, |sized| {
+    size_targets(targets, priority, |sized| {
         settled.lock().unwrap_or_else(|error| error.into_inner())[sized.index] = (sized.bytes, sized.last_modified);
     });
     let settled = settled.into_inner().unwrap_or_default();
@@ -109,6 +114,9 @@ pub(crate) struct Found {
     pub bytes: u64,
     pub entry_count: usize,
     pub last_modified: Option<SystemTime>,
+    /// Newest regular file only: the age of a target whose owner touches its
+    /// directories without using it (CoreSimulator does).
+    pub newest_file: Option<SystemTime>,
     pub subdirs: Vec<PathBuf>,
     pub broken: bool,
 }
@@ -145,9 +153,6 @@ pub fn measure_dir_with_modified(path: &Path) -> Measurement {
 }
 
 pub(crate) fn read_dir(dir: &Path) -> Found {
-    if crate::simulators::is_device_fs(dir) {
-        return Found { bytes: 0, entry_count: 0, last_modified: None, subdirs: Vec::new(), broken: false };
-    }
     crate::bulk::read_dir(dir, crate::bulk::BUFFER_SIZE).unwrap_or_else(|| read_dir_standard(dir))
 }
 
@@ -161,6 +166,9 @@ pub(crate) fn read_dir_standard(dir: &Path) -> Found {
         let Ok(modified) = metadata.modified() else { return broken() };
         found.entry_count += 1;
         found.last_modified = found.last_modified.max(Some(modified));
+        if file_type.is_file() {
+            found.newest_file = found.newest_file.max(Some(modified));
+        }
         if file_type.is_dir() {
             found.subdirs.push(entry.path());
         } else if !file_type.is_symlink() {
@@ -176,19 +184,22 @@ fn empty_found(dir: &Path) -> Option<Found> {
         bytes: 0,
         entry_count: 0,
         last_modified: Some(last_modified),
+        newest_file: None,
         subdirs: Vec::new(),
         broken: false,
     })
 }
 
 fn broken() -> Found {
-    Found { bytes: 0, entry_count: 0, last_modified: None, subdirs: Vec::new(), broken: true }
+    Found {
+        bytes: 0, entry_count: 0, last_modified: None, newest_file: None,
+        subdirs: Vec::new(), broken: true,
+    }
 }
 
 pub(crate) fn dir_measurement_fallback(path: &Path) -> Measurement {
     let mut measurement = Measurement { bytes: 0, last_modified: None };
-    for entry in WalkDir::new(path).follow_links(false).into_iter()
-        .filter_entry(|entry| !crate::simulators::is_device_fs(entry.path())) {
+    for entry in WalkDir::new(path).follow_links(false) {
         let Ok(entry) = entry else { return incomplete(measurement.bytes) };
         let Ok(metadata) = entry.metadata() else { return incomplete(measurement.bytes) };
         let Ok(modified) = metadata.modified() else { return incomplete(measurement.bytes) };
@@ -204,7 +215,7 @@ fn incomplete(bytes: u64) -> Measurement {
 
 #[cfg(test)]
 mod tests {
-    use super::{scan_sizes, size_targets};
+    use super::{scan_sizes, size_targets, Priority};
     use crate::scanner::{ArtifactKind, TargetDir};
     use std::path::{Path, PathBuf};
     use std::sync::Mutex;
@@ -233,13 +244,35 @@ mod tests {
         path
     }
 
+    /// CoreSimulator touches a device's directories without anyone using it, so
+    /// a simulator is as old as its newest file; anything else counts every entry.
+    #[test]
+    fn a_simulator_is_aged_by_its_newest_file_alone() {
+        let root = scratch("file-aged");
+        tree(&root, &[("sim/data/old.db", 4096), ("other/old.db", 4096)]);
+        let old = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+        for file in ["sim/data/old.db", "other/old.db"] {
+            let handle = std::fs::File::options().write(true).open(root.join(file)).unwrap();
+            handle.set_modified(old).unwrap();
+        }
+        std::fs::create_dir_all(root.join("sim/data/touched")).unwrap();
+        std::fs::create_dir_all(root.join("other/touched")).unwrap();
+        let mut simulator = target(root.join("sim"));
+        simulator.kind = ArtifactKind::Simulator;
+        let mut targets = vec![simulator, target(root.join("other"))];
+        let ages = scan_sizes(&mut targets, Priority::Waited);
+        assert_eq!(ages.get(&root.join("sim")), Some(&old));
+        assert!(ages.get(&root.join("other")).is_some_and(|age| *age > old));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn every_target_is_reported_exactly_once() {
         let root = scratch("once");
         tree(&root, &[("a/one.bin", 4096), ("b/two.bin", 4096), ("b/deep/three.bin", 4096)]);
         let targets = vec![target(root.join("a")), target(root.join("b"))];
         let seen = Mutex::new(Vec::new());
-        size_targets(&targets, |sized| seen.lock().unwrap().push(sized.index));
+        size_targets(&targets, Priority::Waited, |sized| seen.lock().unwrap().push(sized.index));
         let mut seen = seen.into_inner().unwrap();
         seen.sort_unstable();
         assert_eq!(seen, [0, 1]);
@@ -249,7 +282,7 @@ mod tests {
     #[test]
     fn a_missing_directory_sizes_to_nothing_rather_than_hanging() {
         let mut targets = vec![target(scratch("absent"))];
-        scan_sizes(&mut targets);
+        scan_sizes(&mut targets, Priority::Waited);
         assert_eq!(targets[0].size_bytes, 0);
     }
 }

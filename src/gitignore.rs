@@ -52,7 +52,7 @@ mod tests {
         path
     }
 
-    fn write_ignore(dir: &PathBuf, text: &str) {
+    fn write_ignore(dir: &std::path::Path, text: &str) {
         fs::create_dir_all(dir).unwrap();
         fs::write(dir.join(".gitignore"), text).unwrap();
     }

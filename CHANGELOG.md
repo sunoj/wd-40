@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.7.0] — 2026-11-10
+
+### Added
+- **Simulators** (`src/simulators.rs`): a new group listing each shut-down iOS simulator device under `~/Library/Developer/CoreSimulator/Devices`, labelled by name and runtime. Booted devices are never listed. Cleaning goes through `xcrun simctl erase` (or `delete` when its runtime is unavailable), never an unlink, and re-checks that the device is still shut down first. Age comes from the newest file under the device's `data/`, because CoreSimulator touches directory times. Auto-clean never picks a simulator. On the machine measured, devices held 109 GB while the scan offered only their `Caches` directories, about 5% of that.
+- **Every checkout under `~/.aid/worktrees` is walked** (`src/roots.rs`): the old probe assumed `<repo>/<branch>/target`, so in the real `<project>/<type>/<desc>` layout it found nothing, and no group's rules ran there.
+- **`build/` and `dist/` named by their parent's own `.gitignore`** (`src/gitignore.rs`, `src/rules.rs`): output beside a Makefile or Python project had no manifest to recognise it by. Only the `.gitignore` in the same directory counts, never an ancestor's, and a `!` line that re-includes the name or anything under it disqualifies it.
+- **Caches**: Lima image downloads, Playwright browsers, and app updater staging (`~/Library/Caches/*.ShipIt`).
+- `wd40 scan -g simulators` and `-g toolchains`.
+
+### Changed
+- **A scan someone is waiting on runs at utility QoS** (`src/qos.rs`, `src/sizes.rs`): every sizing pass used the background class, and on a heavily loaded Mac the CLI sat for 21 minutes on 0.7 s of CPU. The CLI and a pass whose popover is open now run at utility; timer scans and auto-clean stay in the background.
+- **`wd40 scan -g <group>` only discovers and measures that group**, instead of measuring everything and then filtering.
+
 ## [0.6.5] — 2026-09-30
 
 ### Changed

@@ -90,23 +90,20 @@ fn only_shutdown_devices_replace_their_nested_cache() {
 }
 
 #[test]
-fn age_ignores_directory_and_files_outside_data() {
-    let root = std::env::temp_dir().join(format!("wd40-simulator-age-{}", std::process::id()));
-    std::fs::create_dir_all(root.join("data")).unwrap();
-    let file = std::fs::File::create(root.join("data/old")).unwrap();
-    let old = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1000);
-    file.set_modified(old).unwrap();
-    std::fs::write(root.join("device.plist"), "new").unwrap();
-    std::fs::create_dir(root.join("data/new-directory")).unwrap();
-    assert_eq!(file_age(&root), Some(old));
-    std::fs::remove_dir_all(root).unwrap();
-}
-
-#[test]
 fn mirror_and_descendants_are_excluded() {
     let mirror = dirs::home_dir()
         .unwrap()
         .join("Library/Developer/CoreDevice/DeviceFS");
     assert!(is_device_fs(&mirror));
     assert!(is_device_fs(&mirror.join("device/target")));
+    assert!(!is_device_fs(std::path::Path::new("/Users/x/Develop/DeviceFS/target")));
+    assert!(!is_device_fs(std::path::Path::new("/Users/x/CoreDevice/notes/DeviceFS")));
+}
+
+#[test]
+fn runtime_labels_read_as_versions() {
+    let id = "com.apple.CoreSimulator.SimRuntime.";
+    assert_eq!(runtime_label(&format!("{id}iOS-27-0")), "iOS 27.0");
+    assert_eq!(runtime_label(&format!("{id}iOS-27-2-iPhone19-4")), "iOS 27.2 iPhone19-4");
+    assert_eq!(runtime_label(&format!("{id}watchOS-12-1")), "watchOS 12.1");
 }

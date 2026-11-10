@@ -1,6 +1,7 @@
 // Discovery regression tests for project markers, pruning, and roots.
 // Uses scratch directories and the discovery API.
-use super::{is_dev_artifact, scan_discover, walk_types};
+use super::{scan_discover, walk_types};
+use crate::rules::is_dev_artifact;
 use crate::config::Config;
 use crate::scanner::ArtifactGroup;
 use std::fs;
