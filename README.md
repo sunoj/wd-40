@@ -145,6 +145,12 @@ Setting `UPLOAD_SECRET` in the environment still overrides the Keychain for a
 one-off run. Whatever is stored here must match the Worker's own
 `UPLOAD_SECRET`; rotating means writing both.
 
+Before building, `scripts/check-sparkle-key.sh` compares the Keychain's signing
+key (`generate_keys -p`) with `SUPublicEDKey` in `Info.plist` and stops on a
+mismatch: installed copies refuse an update signed by any other key. On a new
+Mac, move the key with `generate_keys -x` and `-f`; never generate one.
+`./scripts/test-release-key-check.sh` exercises that gate without a build.
+
 ## Performance
 
 - **Discovery**: Parallel directory walk with smart skip rules (hidden dirs, system dirs, symlinks)

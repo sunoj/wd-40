@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **`release.sh` stops before building when the Keychain's Sparkle key is not the one `Info.plist` trusts** (`scripts/check-sparkle-key.sh`): 0.7.0 was first published with an EdDSA signature from a different key, and every installed copy reported "The update is improperly signed". The appcast was re-signed with the trusted key; the archives did not change.
+
 ## [0.7.0] — 2026-11-10
 
 ### Added
