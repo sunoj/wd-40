@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Downloads and caches the Sparkle framework used for in-app updates.
-# Output: .sparkle/Sparkle.framework and .sparkle/bin/sign_update; deps: curl, tar.
+# Output: .sparkle/Sparkle.framework, .sparkle/bin/{sign_update,generate_keys}; deps: curl, tar.
 
 set -euo pipefail
 
@@ -10,7 +10,7 @@ CACHE_DIR="$ROOT_DIR/.sparkle"
 FRAMEWORK="$CACHE_DIR/Sparkle.framework"
 URL="https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz"
 
-if [[ -d "$FRAMEWORK" && -x "$CACHE_DIR/bin/sign_update" ]]; then
+if [[ -d "$FRAMEWORK" && -x "$CACHE_DIR/bin/sign_update" && -x "$CACHE_DIR/bin/generate_keys" ]]; then
   printf 'Sparkle %s already cached at %s\n' "$SPARKLE_VERSION" "$CACHE_DIR"
   exit 0
 fi
