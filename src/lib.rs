@@ -8,6 +8,7 @@ pub mod discover;
 pub mod extent_cache;
 pub mod extents;
 pub mod disk;
+mod gitignore;
 pub mod nesting;
 pub mod qos;
 pub mod reclaim;
@@ -20,3 +21,5 @@ mod walk;
 
 #[cfg(test)]
 mod safety_tests;
+#[cfg(test)]
+mod scan_gap_tests;

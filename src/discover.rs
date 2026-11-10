@@ -37,9 +37,14 @@ pub fn scan_discover(config: &Config) -> Vec<TargetDir> {
     let types = walk_types(config);
     // Nested roots are walked too (the outer walk may not reach them); dedupe is below.
     let mut seen_roots = HashSet::new();
+    let mut walk_roots = config.scan_dirs.clone();
+    if !types.is_empty() {
+        walk_roots.extend(roots::aid_worktrees_scan_root());
+    }
     let dirs: Vec<&PathBuf> = match types.is_empty() {
         true => Vec::new(),
-        false => config.scan_dirs.iter()
+        false => walk_roots
+            .iter()
             .filter(|dir| dir.canonicalize().is_ok_and(|path| seen_roots.insert(path)))
             .collect(),
     };
@@ -58,7 +63,6 @@ pub fn scan_discover(config: &Config) -> Vec<TargetDir> {
     if config.scans(ArtifactGroup::Rust) {
         roots::collect_tmp_targets(&mut found);
         roots::collect_shared_cargo_target(&mut found);
-        roots::collect_aid_worktrees(&mut found);
     }
     if config.scans(ArtifactGroup::Caches) {
         roots::collect_dev_caches(&mut found);
@@ -271,19 +275,6 @@ mod tests {
         let found = scan_discover(&config);
         assert!(found.iter().any(|item| item.path == build));
         assert!(!found.iter().any(|item| item.path == build.join("target")));
-        cleanup(&root);
-    }
-
-    #[test]
-    fn overlapping_symlink_roots_find_target_once() {
-        let root = temp_dir("overlapping-roots");
-        let a = root.join("A");
-        let b = root.join("B");
-        let target = a.join("apps/x/target");
-        fs::create_dir_all(target.join("debug")).unwrap();
-        std::os::unix::fs::symlink(a.join("apps"), &b).unwrap();
-        let config = Config { scan_dirs: vec![a, b], scan_groups: vec!["rust".into()], ..Config::default() };
-        assert_eq!(scan_discover(&config).iter().filter(|item| item.path == target).count(), 1);
         cleanup(&root);
     }
 
