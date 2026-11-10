@@ -1,6 +1,6 @@
 [package]
 name = "wd40"
-version = "0.6.5"
+version = "0.7.0"
 edition = "2021"
 description = "WD-40 — find and clean dev build artifacts (target/, node_modules/, .next/, dist/, build/) on macOS"
 license = "MIT"
@@ -28,6 +28,7 @@ objc2-foundation = { version = "0.3", features = ["NSObject", "NSString", "NSThr
 objc2-app-kit = { version = "0.3", features = ["NSAnimation", "NSAnimationContext", "NSApplication", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSControl", "NSResponder", "NSImage", "NSImageView", "NSRunningApplication", "NSColor", "NSBezierPath", "NSGraphics", "NSAttributedString", "NSFont", "NSAlert", "NSPanel", "NSWindow", "NSParagraphStyle", "NSStringDrawing", "NSText", "NSCell", "NSButton", "NSButtonCell", "NSTextField", "NSView", "NSViewController", "NSVisualEffectView", "NSBox", "NSPopover", "NSAppearance", "NSStackView", "NSLayoutConstraint", "NSUserInterfaceLayout", "NSBitmapImageRep", "NSSlider", "NSEvent", "NSScrollView", "NSClipView", "NSTrackingArea", "NSWorkspace", "NSOpenPanel", "NSSavePanel"] }
 walkdir = "2"
 toml = "0.8"
+serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 dirs = "6"
 libc = "0.2"

@@ -36,6 +36,8 @@ const KNOWN: &[(&str, &str)] = &[
     (".cache/yarn", "Yarn cache"),
     (".npm/_cacache", "npm cache"),
     (".cargo/registry", "Cargo registry"),
+    ("Library/Caches/lima", "Lima image cache"),
+    ("Library/Caches/ms-playwright", "Playwright browsers"),
 ];
 
 /// Every simulator's cache lives at
@@ -51,11 +53,20 @@ pub fn cache_label(path: &Path) -> Option<String> {
     if let Some(label) = xcode_device_support_label(path) {
         return Some(label);
     }
+    if let Some(label) = shipit_label(path) {
+        return Some(label);
+    }
     let text = path.to_string_lossy();
     KNOWN
         .iter()
         .find(|(tail, _)| text.ends_with(tail))
         .map(|(_, label)| (*label).to_string())
+}
+
+fn shipit_label(path: &Path) -> Option<String> {
+    let name = path.file_name()?.to_str()?;
+    let app = name.strip_suffix(".ShipIt")?;
+    Some(format!("{app} updater cache"))
 }
 
 fn xcode_device_support_label(path: &Path) -> Option<String> {
@@ -151,9 +162,19 @@ mod tests {
             ("Library/Caches/Mozilla.sccache", "sccache"), ("Library/Caches/deno", "Deno cache"),
             (".npm/_npx", "npx cache"),
             ("Library/Developer/CoreSimulator/Caches", "CoreSimulator cache"),
+            ("Library/Caches/lima", "Lima image cache"),
+            ("Library/Caches/ms-playwright", "Playwright browsers"),
         ] {
             assert_eq!(cache_label(&Path::new("/Users/x").join(path)).as_deref(), Some(label));
         }
+    }
+
+    #[test]
+    fn shipit_caches_are_named_after_their_app() {
+        assert_eq!(
+            cache_label(Path::new("/Users/x/Library/Caches/com.example.App.ShipIt")).as_deref(),
+            Some("com.example.App updater cache")
+        );
     }
 
     #[test]

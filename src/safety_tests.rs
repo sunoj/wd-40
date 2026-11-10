@@ -37,7 +37,7 @@ fn a_nested_target_is_not_counted_in_the_one_around_it() {
     let root = scratch("nested");
     tree(&root, &[("outer/own.bin", 4096), ("outer/inner/kept.bin", 4096)]);
     let mut targets = vec![target(root.join("outer")), target(root.join("outer/inner"))];
-    scan_sizes(&mut targets);
+    scan_sizes(&mut targets, crate::qos::Priority::Waited);
     let total: u64 = targets.iter().map(|target| target.size_bytes).sum();
     let outer = targets.iter().find(|target| target.path.ends_with("outer")).unwrap();
     let inner = targets.iter().find(|target| target.path.ends_with("inner")).unwrap();
@@ -50,7 +50,7 @@ fn a_nested_target_is_not_counted_in_the_one_around_it() {
 #[test]
 fn an_empty_target_list_does_no_work() {
     let mut targets: Vec<TargetDir> = Vec::new();
-    scan_sizes(&mut targets);
+    scan_sizes(&mut targets, crate::qos::Priority::Waited);
     assert!(targets.is_empty());
 }
 
@@ -63,7 +63,7 @@ fn newest_nested_content_replaces_the_target_directory_mtime() {
     std::thread::sleep(Duration::from_millis(20));
     std::fs::write(nested.join("fresh"), b"new").expect("nested content");
     let mut targets = vec![target(root.clone())];
-    scan_sizes(&mut targets);
+    scan_sizes(&mut targets, crate::qos::Priority::Waited);
     assert!(targets[0].last_modified > directory_mtime);
     let _ = std::fs::remove_dir_all(&root);
 }

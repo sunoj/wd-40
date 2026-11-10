@@ -1,7 +1,7 @@
-// Scheduling class for the threads that walk the disk. A scan is housekeeping:
-// it must never take cores or disk bandwidth away from whatever the user is
-// actually doing, which on a developer's Mac is usually a build.
-// Exports: `background`, `utility`, `workers`.
+// Scheduling class for the threads that walk the disk, chosen by who is
+// waiting: a timer scan must never take the machine from a build, but on a
+// loaded Mac a background-class pass someone is watching barely runs at all.
+// Exports: `Priority`, `background`, `utility`, `workers`.
 // Deps: libc.
 
 /// `qos_class_t` from <sys/qos.h>.
@@ -15,6 +15,27 @@ extern "C" {
         qos_class: libc::c_uint,
         relative_priority: libc::c_int,
     ) -> libc::c_int;
+}
+
+/// Who a pass is for. Background class on a Mac with load far above its core
+/// count left a CLI scan at 0.7 s of CPU after 21 minutes; a person waiting is
+/// owed the utility class, which still yields to the foreground.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Priority {
+    /// The CLI, or a scan whose popover is open.
+    Waited,
+    /// A timer scan or auto-clean nobody is looking at.
+    Housekeeping,
+}
+
+impl Priority {
+    /// Put the calling thread in this priority's class.
+    pub fn apply(self) {
+        match self {
+            Self::Waited => utility(),
+            Self::Housekeeping => background(),
+        }
+    }
 }
 
 /// Put the calling thread in the background class. For work nobody asked for:

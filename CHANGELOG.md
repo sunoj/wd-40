@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.7.0] — 2026-11-10
+
+### Added
+- **Simulators** (`src/simulators.rs`): a new group listing each shut-down iOS simulator device under `~/Library/Developer/CoreSimulator/Devices`, labelled by name and runtime. Booted devices are never listed. Cleaning goes through `xcrun simctl erase` (or `delete` when its runtime is unavailable), never an unlink, and re-checks that the device is still shut down first. Age comes from the newest file under the device's `data/`, because CoreSimulator touches directory times. Auto-clean never picks a simulator. On the machine measured, devices held 109 GB while the scan offered only their `Caches` directories, about 5% of that.
+- **Every checkout under `~/.aid/worktrees` is walked** (`src/roots.rs`): the old probe assumed `<repo>/<branch>/target`, so in the real `<project>/<type>/<desc>` layout it found nothing, and no group's rules ran there.
+- **`build/` and `dist/` named by their parent's own `.gitignore`** (`src/gitignore.rs`, `src/rules.rs`): output beside a Makefile or Python project had no manifest to recognise it by. Only the `.gitignore` in the same directory counts, never an ancestor's, and a `!` line that re-includes the name or anything under it disqualifies it.
+- **Caches**: Lima image downloads, Playwright browsers, and app updater staging (`~/Library/Caches/*.ShipIt`).
+- `wd40 scan -g simulators` and `-g toolchains`.
+
+### Changed
+- **A scan someone is waiting on runs at utility QoS** (`src/qos.rs`, `src/sizes.rs`): every sizing pass used the background class, and on a heavily loaded Mac the CLI sat for 21 minutes on 0.7 s of CPU. The CLI and a pass whose popover is open now run at utility; timer scans and auto-clean stay in the background.
+- **Discovery is walked by a small pool from one shared stack** (`src/discover_walk.rs`): it ran one thread per root, so a checkout container with ~90k directories was walked serially. Discovering Rust targets went from 7.6 s to 1.9 s. Results are still listed in root order.
+- **A simulator's age comes from the sizing walk itself** (`src/walk.rs`, `src/bulk.rs`), which now tracks the newest regular file next to the newest entry, instead of a second walk of every device: `wd40 scan -g simulators` went from 21.6 s to 3.1 s.
+- **`wd40 scan -g <group>` only discovers and measures that group**, instead of measuring everything and then filtering. `-g caches` went from 18.6 s to 1.7 s on the same machine.
+- A full scan of the measured machine finds 143.9 GB in 195 targets in 6.7 s, where 0.6.5 found 30.8 GB in 75 targets in 3.1 s.
+
 ## [0.6.5] — 2026-09-30
 
 ### Changed

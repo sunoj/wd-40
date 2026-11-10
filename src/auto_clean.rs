@@ -107,7 +107,7 @@ fn run(config: Config, stop: &AtomicBool) {
     if stop.load(Ordering::Relaxed) {
         return;
     }
-    let measured_ages = wd40::sizes::scan_sizes(&mut targets);
+    let measured_ages = wd40::sizes::scan_sizes(&mut targets, wd40::qos::Priority::Housekeeping);
     if stop.load(Ordering::Relaxed) {
         return;
     }
@@ -202,7 +202,7 @@ fn is_candidate(
     last_modified: Option<SystemTime>,
 ) -> bool {
     if config.max_age_days == 0
-        || matches!(target.kind, ArtifactKind::Toolchain)
+        || matches!(target.kind, ArtifactKind::Toolchain | ArtifactKind::Simulator)
         || !config.scans(target.kind.group())
     {
         return false;
@@ -272,6 +272,7 @@ fn receipt_group_label(group: ArtifactGroup) -> &'static str {
         ArtifactGroup::NodeModules => "Node",
         ArtifactGroup::BuildOutput => "Builds",
         ArtifactGroup::Caches => "Caches",
+        ArtifactGroup::Simulators => "Simulators",
         ArtifactGroup::Toolchains => "Toolchains",
     }
 }

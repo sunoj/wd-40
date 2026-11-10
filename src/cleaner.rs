@@ -44,17 +44,17 @@ impl Removal {
     }
 }
 
-/// Remove one target. Safety: the path is re-checked, because a scan result is
-/// a claim about the past and a symlink could have taken its place since.
+/// Remove one target, re-checking the path: a symlink may have replaced it since.
 ///
-/// A toolchain is the one artifact that is not ours to unlink: rustup keeps its
-/// own record of what is installed, and an `rm` would leave that record lying.
+/// Toolchains and simulators are not ours to unlink: rustup and CoreSimulator
+/// keep their own records of what exists, and an `rm` would leave those lying.
 pub fn remove_target(target: &TargetDir) -> Removal {
     if target.path.is_symlink() || !target.path.is_dir() {
         return Removal::Refused("path changed since scan (symlink or missing)".into());
     }
     crate::cache::forget(&target.path);
     match target.kind {
+        ArtifactKind::Simulator => settle(target, crate::simulators::clean(&target.path).err()),
         ArtifactKind::Toolchain => settle(target, crate::toolchains::uninstall(&target.path).err()),
         _ => settle(target, fs::remove_dir_all(&target.path).err().map(|err| err.to_string())),
     }

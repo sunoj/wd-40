@@ -121,6 +121,7 @@ fn empty_found() -> crate::sizes::Found {
         bytes: 0,
         entry_count: 0,
         last_modified: None,
+        newest_file: None,
         subdirs: Vec::new(),
         broken: false,
     }

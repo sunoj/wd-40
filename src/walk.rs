@@ -31,6 +31,9 @@ struct Queue {
     outstanding: Vec<usize>,
     bytes: Vec<u64>,
     last_modified: Vec<Option<SystemTime>>,
+    newest_file: Vec<Option<SystemTime>>,
+    /// Targets aged by their newest regular file rather than any entry.
+    file_aged: Vec<bool>,
     /// A bulk read failed somewhere under this target, so its whole subtree is
     /// re-walked the slow way rather than reported short.
     broken: Vec<bool>,
@@ -64,8 +67,9 @@ pub(crate) struct Walk {
 impl Walk {
     /// `skip` names targets whose size is already known, so they are never
     /// queued. Their figures reach the publisher before the walk starts, which
-    /// is what keeps nesting right without walking them.
-    pub fn new(paths: &[PathBuf], skip: &[bool]) -> Self {
+    /// is what keeps nesting right without walking them. `file_aged` names
+    /// targets whose age is their newest regular file.
+    pub fn new(paths: &[PathBuf], skip: &[bool], file_aged: &[bool]) -> Self {
         // Shallowest first. Nesting is handled by the publisher whatever the
         // order, so this is purely about the tail: the big roots (cache stores,
         // shared cargo targets) sit near the top of the tree, and opening one of
@@ -84,6 +88,8 @@ impl Walk {
                 outstanding: vec![0; paths.len()],
                 bytes: vec![0; paths.len()],
                 last_modified: vec![None; paths.len()],
+                newest_file: vec![None; paths.len()],
+                file_aged: (0..paths.len()).map(|i| file_aged.get(i).copied().unwrap_or(false)).collect(),
                 broken: vec![false; paths.len()],
             }),
             wake: Condvar::new(),
@@ -145,6 +151,7 @@ impl Walk {
         queue.busy -= 1;
         queue.bytes[target] = queue.bytes[target].saturating_add(found.bytes);
         queue.last_modified[target] = queue.last_modified[target].max(found.last_modified);
+        queue.newest_file[target] = queue.newest_file[target].max(found.newest_file);
         queue.broken[target] |= found.broken;
         queue.outstanding[target] += found.subdirs.len();
         queue.outstanding[target] -= 1;
@@ -172,7 +179,11 @@ impl Walk {
     fn settle(&self, root: &Path, index: usize) -> Measurement {
         let (bytes, last_modified, broken) = {
             let queue = self.queue.lock().unwrap();
-            (queue.bytes[index], queue.last_modified[index], queue.broken[index])
+            let modified = match queue.file_aged[index] {
+                true => queue.newest_file[index],
+                false => queue.last_modified[index],
+            };
+            (queue.bytes[index], modified, queue.broken[index])
         };
         let limit = disk_space(root).map(|stats| stats.total_bytes);
         if !broken && limit.is_none_or(|max| bytes <= max) {

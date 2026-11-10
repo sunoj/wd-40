@@ -49,20 +49,6 @@ fn is_tmp_target_name(name: &str) -> bool {
     name.starts_with("cc-target-") || name.ends_with("-target") || name.contains("-target-")
 }
 
-/// Collect ~/.aid/worktrees/<repo>/<branch>/target directories.
-/// These live under a dot-prefixed dir so the main WalkDir skips them.
-pub(crate) fn collect_aid_worktrees(found: &mut Vec<TargetDir>) {
-    let Some(home) = dirs::home_dir() else { return };
-    for repo in subdirs(&home.join(".aid").join("worktrees")) {
-        for branch in subdirs(&repo) {
-            let target = branch.join("target");
-            if target.is_dir() && is_cargo_target(&target) {
-                push_dir(found, target, ArtifactKind::RustTarget);
-            }
-        }
-    }
-}
-
 /// Collect per-project subdirs under ~/.cargo-target/ (shared CARGO_TARGET_DIR
 /// root). Supports both <project>/debug and <project>/<session>/debug layouts.
 pub(crate) fn collect_shared_cargo_target(found: &mut Vec<TargetDir>) {
@@ -111,6 +97,8 @@ fn collect_home_caches(found: &mut Vec<TargetDir>, home: &Path) {
         home.join("Library/Caches/node-gyp"),
         home.join("Library/Caches/Mozilla.sccache"),
         home.join("Library/Caches/deno"),
+        home.join("Library/Caches/lima"),
+        home.join("Library/Caches/ms-playwright"),
         home.join(".npm/_npx"),
         home.join("Library/Developer/CoreSimulator/Caches"),
         // ~/.npm is npm's cache *root*, but it also holds _logs and npx state.
@@ -134,6 +122,7 @@ fn collect_home_caches(found: &mut Vec<TargetDir>, home: &Path) {
 
 fn collect_dynamic_caches(found: &mut Vec<TargetDir>, home: &Path) {
     collect_xcode_device_support(found, &home.join("Library/Developer/Xcode"));
+    collect_shipit_caches(found, &home.join("Library/Caches"));
 
     // Cargo's downloads: the .crate tarballs, the sources unpacked from them and
     // the registry index. All of it comes back on the next build, so it goes in
@@ -148,6 +137,15 @@ fn collect_dynamic_caches(found: &mut Vec<TargetDir>, home: &Path) {
         let caches = device.join("data/Library/Caches");
         if caches.is_dir() && !caches.is_symlink() {
             push_dir(found, caches, ArtifactKind::Cache);
+        }
+    }
+}
+
+pub(crate) fn collect_shipit_caches(found: &mut Vec<TargetDir>, caches_root: &Path) {
+    for path in subdirs(caches_root) {
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+        if name.ends_with(".ShipIt") {
+            push_dir(found, path, ArtifactKind::Cache);
         }
     }
 }
@@ -236,8 +234,9 @@ mod tests {
             "Library/Caches/pip", ".cache/uv", "Library/Caches/uv",
             "Library/Caches/go-build", ".gradle/caches", ".gradle/wrapper/dists",
             ".bun/install/cache", "Library/Caches/CocoaPods", "Library/Caches/node-gyp",
-            "Library/Caches/Mozilla.sccache", "Library/Caches/deno", ".npm/_npx",
-            "Library/Developer/CoreSimulator/Caches",
+            "Library/Caches/Mozilla.sccache", "Library/Caches/deno",
+            "Library/Caches/lima", "Library/Caches/ms-playwright",
+            ".npm/_npx", "Library/Developer/CoreSimulator/Caches",
         ];
         let mut found = Vec::new();
         collect_home_caches(&mut found, &home);

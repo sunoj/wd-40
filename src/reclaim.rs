@@ -259,7 +259,7 @@ mod tests {
         let measure = |path: PathBuf| {
             let target = target(path, 0);
             let result = Mutex::new(None);
-            crate::sizes::size_targets(std::slice::from_ref(&target), |sized| {
+            crate::sizes::size_targets(std::slice::from_ref(&target), crate::qos::Priority::Waited, |sized| {
                 *result.lock().unwrap() = Some((sized.bytes, sized.last_modified));
             });
             let (size_bytes, last_modified) = result.into_inner().unwrap().expect("one target");

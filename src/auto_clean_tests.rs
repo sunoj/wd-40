@@ -102,6 +102,13 @@ fn toolchains_are_never_auto_clean_candidates() {
 }
 
 #[test]
+fn simulators_are_never_auto_clean_candidates() {
+    let now = SystemTime::now();
+    let targets = vec![target(now, 1000, ArtifactKind::Simulator)];
+    assert!(candidate_indices(&targets, &measured_ages(&targets), &Config::default(), now).is_empty());
+}
+
+#[test]
 fn missing_age_evidence_keeps_an_unattended_target() {
     let now = SystemTime::now();
     let targets = vec![target(now, 30, ArtifactKind::RustTarget)];
@@ -121,7 +128,7 @@ fn unreadable_fresh_content_cannot_be_misread_as_old() {
 
     let mut targets = vec![target(SystemTime::now(), 30, ArtifactKind::RustTarget)];
     targets[0].path = root.clone();
-    let ages = wd40::sizes::scan_sizes(&mut targets);
+    let ages = wd40::sizes::scan_sizes(&mut targets, wd40::qos::Priority::Waited);
     std::fs::set_permissions(&sealed, std::fs::Permissions::from_mode(0o700)).expect("restore");
     assert!(!ages.contains_key(&root), "an incomplete walk has no age evidence");
     assert!(candidate_indices(&targets, &ages, &Config::default(), SystemTime::now()).is_empty());
@@ -133,7 +140,7 @@ fn successfully_measured_old_content_is_an_unattended_candidate() {
     let root = stale_tree("known-old", 1024);
     let mut targets = vec![target(SystemTime::now(), 30, ArtifactKind::RustTarget)];
     targets[0].path = root.clone();
-    let ages = wd40::sizes::scan_sizes(&mut targets);
+    let ages = wd40::sizes::scan_sizes(&mut targets, wd40::qos::Priority::Waited);
     assert_eq!(candidate_indices(&targets, &ages, &Config::default(), SystemTime::now()), [0]);
     let _ = std::fs::remove_dir_all(&root);
 }

@@ -5,6 +5,7 @@ use wd40::config::Config;
 use wd40::disk::sum_bytes;
 use wd40::discover::scan_discover;
 use wd40::scanner::{human_size, ArtifactGroup, TargetDir};
+use wd40::qos::Priority;
 use wd40::sizes::scan_sizes;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -31,13 +32,18 @@ fn main() {
 }
 
 fn load_targets(args: &[String]) -> (Vec<TargetDir>, HashMap<PathBuf, SystemTime>) {
-    let config = Config::load();
+    let mut config = Config::load();
+    let group = parse_group_flag(args);
+    // A filtered scan neither discovers nor measures the groups it will drop.
+    if let Some(group) = group {
+        config.scan_groups.retain(|key| key == group.key());
+    }
     eprint!("Scanning...");
     let mut targets = scan_discover(&config);
-    let measured_ages = scan_sizes(&mut targets);
+    let measured_ages = scan_sizes(&mut targets, Priority::Waited);
     eprintln!(" found {} targets", targets.len());
 
-    if let Some(group) = parse_group_flag(args) {
+    if let Some(group) = group {
         targets.retain(|t| t.kind.group() == group);
     }
     (targets, measured_ages)
@@ -154,6 +160,8 @@ fn parse_group_flag(args: &[String]) -> Option<ArtifactGroup> {
                 "node" | "n" | "node_modules" => Some(ArtifactGroup::NodeModules),
                 "build" | "b" => Some(ArtifactGroup::BuildOutput),
                 "cache" | "caches" => Some(ArtifactGroup::Caches),
+                "simulators" | "simulator" | "sim" => Some(ArtifactGroup::Simulators),
+                "toolchains" | "toolchain" | "t" => Some(ArtifactGroup::Toolchains),
                 _ => None,
             };
         }
@@ -203,7 +211,9 @@ fn print_table(targets: &[TargetDir]) {
                 human_size(t.size_bytes),
                 age_days,
                 t.kind.label(),
-                t.path.display()
+                if matches!(t.kind, wd40::scanner::ArtifactKind::Simulator) {
+                    format!("{}  {}", wd40::simulators::label(&t.path), t.path.display())
+                } else { t.path.display().to_string() }
             );
         }
     }
@@ -224,7 +234,8 @@ COMMANDS:
     help, -h           Show this help
 
 OPTIONS:
-    -g, --group <type> Filter by group: rust, node, build, caches
+    -g, --group <type> Filter by group: rust, node, build, caches,
+                       simulators, toolchains
     -d, --days <N>     Age threshold for clean-old (default: from config)
     -n, --dry-run      Show what would be cleaned without deleting
 

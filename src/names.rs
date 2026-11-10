@@ -127,6 +127,7 @@ pub fn project_name(td: &TargetDir) -> String {
             // names like "smart-router-target" stay recognizable.
             dir_name.strip_prefix("cc-target-").unwrap_or(dir_name).to_string()
         }
+        ArtifactKind::Simulator => wd40::simulators::label(&td.path),
         ArtifactKind::Toolchain => wd40::toolchains::label(&td.path),
         // A cache is named after the tool that fills it: its own directory is
         // called "Caches" or "store" on every one of them.
