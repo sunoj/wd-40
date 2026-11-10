@@ -11,7 +11,10 @@
 
 ### Changed
 - **A scan someone is waiting on runs at utility QoS** (`src/qos.rs`, `src/sizes.rs`): every sizing pass used the background class, and on a heavily loaded Mac the CLI sat for 21 minutes on 0.7 s of CPU. The CLI and a pass whose popover is open now run at utility; timer scans and auto-clean stay in the background.
-- **`wd40 scan -g <group>` only discovers and measures that group**, instead of measuring everything and then filtering.
+- **Discovery is walked by a small pool from one shared stack** (`src/discover_walk.rs`): it ran one thread per root, so a checkout container with ~90k directories was walked serially. Discovering Rust targets went from 7.6 s to 1.9 s. Results are still listed in root order.
+- **A simulator's age comes from the sizing walk itself** (`src/walk.rs`, `src/bulk.rs`), which now tracks the newest regular file next to the newest entry, instead of a second walk of every device: `wd40 scan -g simulators` went from 21.6 s to 3.1 s.
+- **`wd40 scan -g <group>` only discovers and measures that group**, instead of measuring everything and then filtering. `-g caches` went from 18.6 s to 1.7 s on the same machine.
+- A full scan of the measured machine finds 143.9 GB in 195 targets in 6.7 s, where 0.6.5 found 30.8 GB in 75 targets in 3.1 s.
 
 ## [0.6.5] — 2026-09-30
 
