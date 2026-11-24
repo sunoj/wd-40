@@ -116,7 +116,7 @@ pub(crate) struct AppState {
     /// no figure yet and must never be drawn as though it had one.
     pub measured: HashSet<usize>,
     pub selected: HashSet<usize>,
-    /// What the user has unfolded: group keys, and `scan_calm::LIST`.
+    /// The groups the user has unfolded, by key.
     pub open: HashSet<&'static str>,
     pub screen: UiScreen,
     pub cleaning: Option<CleanProgress>,

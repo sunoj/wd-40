@@ -1,7 +1,7 @@
 // Scan-results screen: grouped selectable targets and the clean CTA, or the
 // all-clear screen when nothing is old. One column in the popover; the same
 // column beside the usage map in the window. Exports: `build`, `header_model`,
-// `membership`, tags. Deps: crate::{header, live, menu_rows, scan_calm, scan_rows, scan_verdict}.
+// `membership`, tags. Deps: crate::{header, live, menu_rows, scan_rows, scan_verdict}.
 
 use crate::group_scroll::{self, GROUP_CAP};
 use crate::header::{self, ScanHeader, SCAN_HEADER_HEIGHT};
@@ -9,7 +9,6 @@ use crate::layout::{self, content_w, panel_w};
 use crate::live::{self, Group, Row, Scan};
 use crate::menu_rows::{plan_groups, Fold, GroupPlan};
 use crate::names::display_names;
-use crate::scan_calm::{calm, CALM_H};
 use crate::scan_footer::{draw_footer, footer_h};
 use crate::scan_rows::{self, GroupModel, RowModel, GROUP_H, ROW_H};
 use crate::scan_verdict::{self, VERDICT_H};
@@ -39,8 +38,6 @@ pub const TAG_FOLD_BASE: isize = 100_000;
 /// How many of its old targets a group shows in the popover while folded.
 const ROWS_PER_GROUP: usize = 3;
 const MAX_HEIGHT: f64 = 680.0;
-/// The all-clear screen has no verdict line: its headline is the verdict.
-const CALM_HEADER_H: f64 = SCAN_HEADER_HEIGHT - 24.0;
 
 pub fn build(state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainThreadMarker) -> (Retained<NSView>, f64) {
     match layout::window_size() {
@@ -49,17 +46,13 @@ pub fn build(state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainThrea
     }
 }
 
-fn header_h(state: &AppState) -> f64 {
-    if calm(state) { CALM_HEADER_H } else { SCAN_HEADER_HEIGHT }
-}
-
 /// The popover: header, a capped list, and the footer in one column.
 fn build_stacked(state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainThreadMarker) -> (Retained<NSView>, f64) {
     let empty = state.empty_targets();
     let plans = plan_groups(&state.targets, &empty, fold(state));
-    let list_h = measure_list(state, &plans);
-    let body_h = (MAX_HEIGHT - header_h(state) - footer_h(state)).min(list_h);
-    let height = header_h(state) + body_h + footer_h(state);
+    let list_h = measure_list(&plans);
+    let body_h = (MAX_HEIGHT - SCAN_HEADER_HEIGHT - footer_h(state)).min(list_h);
+    let height = SCAN_HEADER_HEIGHT + body_h + footer_h(state);
     let root = widgets::root_view(panel_w(), height, theme, mtm);
     let frame = draw_frame(&root, height, state, theme, target, mtm);
     let list = crate::scrolling::scroll_document_view(&root, 0.0, footer_h(state), panel_w(), body_h, list_h, mtm);
@@ -76,8 +69,8 @@ fn build_wide(state: &AppState, theme: &Theme, target: &AnyObject, width: f64, h
     let root = widgets::root_view(width, height, theme, mtm);
     add_fill(&root, panel_w(), 0.0, 1.0, height, theme.line, 1.0, 0.0, mtm);
     let frame = draw_frame(&root, height, state, theme, target, mtm);
-    let body_h = height - header_h(state) - footer_h(state);
-    let list_h = measure_list(state, &plans);
+    let body_h = height - SCAN_HEADER_HEIGHT - footer_h(state);
+    let list_h = measure_list(&plans);
     let list = crate::scrolling::scroll_document_view(&root, 0.0, footer_h(state), panel_w(), body_h, list_h, mtm);
     let (rows, groups) = draw_list(&list, state, &plans, list_h.max(body_h), theme, target, mtm);
     let map_frame = layout::map_frame(width, height);
@@ -91,20 +84,17 @@ fn build_wide(state: &AppState, theme: &Theme, target: &AnyObject, width: f64, h
 
 fn install(state: &AppState, theme: &Theme, frame: (Zone, Zone, Zone), rows: Vec<Row>, groups: Vec<Group>, map: Option<Retained<usage_map::MapView>>) {
     let (header, verdict, footer) = frame;
-    live::install_scan(Scan { theme: *theme, header, verdict, footer, rows, groups, membership: membership(state), calm: calm(state), map });
+    live::install_scan(Scan { theme: *theme, header, verdict, footer, rows, groups, membership: membership(state), map });
 }
 
 /// Header at the top and footer at the bottom of a popover-wide column, with
 /// the verdict line as a zone of its own along the header's lower edge. The
 /// header shows everything found; only the clean button counts the selection.
 fn draw_frame(root: &NSView, height: f64, state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainThreadMarker) -> (Zone, Zone, Zone) {
-    let header = Zone::new(root, 0.0, height - header_h(state), header_h(state), mtm);
+    let header = Zone::new(root, 0.0, height - SCAN_HEADER_HEIGHT, SCAN_HEADER_HEIGHT, mtm);
     header.paint(|view, top| header::draw_scan_header(view, top, &header_model(state), theme, mtm));
-    let verdict_h = if calm(state) { 0.0 } else { VERDICT_H };
-    let verdict = Zone::new(root, 0.0, height - header_h(state) + 1.0, verdict_h, mtm);
-    if !calm(state) {
-        verdict.paint(|view, _| scan_verdict::draw(view, &scan_verdict::verdict(state), theme, target, mtm));
-    }
+    let verdict = Zone::new(root, 0.0, height - SCAN_HEADER_HEIGHT + 1.0, VERDICT_H, mtm);
+    verdict.paint(|view, _| scan_verdict::draw(view, &scan_verdict::verdict(state), theme, target, mtm));
     let footer = Zone::new(root, 0.0, 0.0, footer_h(state) + 1.0, mtm);
     footer.paint(|view, _| draw_footer(view, state, theme, target, mtm));
     (header, verdict, footer)
@@ -153,10 +143,6 @@ fn draw_list(
     target: &AnyObject,
     mtm: MainThreadMarker,
 ) -> (Vec<Row>, Vec<Group>) {
-    if calm(state) {
-        crate::scan_calm::draw(root, y, state, theme, mtm);
-        return (Vec::new(), Vec::new());
-    }
     let names = display_names(&state.targets);
     let max_size = state.measured.iter().filter_map(|i| state.targets.get(*i)).map(|t| t.size_bytes).max().unwrap_or(1).max(1);
     let (mut rows, mut groups) = (Vec::new(), Vec::new());
@@ -224,10 +210,7 @@ fn rows_height(plan: &GroupPlan<'_>) -> f64 {
 /// Between one group's last line and the next group's header, rule included.
 const GROUP_GAP: f64 = 8.0;
 
-fn measure_list(state: &AppState, plans: &[GroupPlan<'_>]) -> f64 {
-    if calm(state) {
-        return CALM_H;
-    }
+fn measure_list(plans: &[GroupPlan<'_>]) -> f64 {
     if plans.is_empty() {
         return 48.0;
     }

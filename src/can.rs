@@ -1,7 +1,7 @@
 // Our can, drawn from the app icon: blue glass body under a yellow label band,
 // silver crimps and a tapered shoulder, red head and straw. It is painted once
 // into its own view, so moving it across the plate never repaints it.
-// Exports: `can_view`, `Pose`, `SPRAY`, `REST`. Deps: objc2 AppKit.
+// Exports: `can_view`, `Pose`, `SPRAY`. Deps: objc2 AppKit.
 
 use objc2::rc::Retained;
 use objc2::{define_class, msg_send, DefinedClass, MainThreadOnly};
@@ -97,9 +97,6 @@ pub struct Pose {
 /// Held over the plate, leaning back from the point it sprays: the straw tip
 /// lands on `SPRAY.tip()` in the view's own coordinates.
 pub const SPRAY: Pose = Pose { origin: (4.0, 13.0), degrees: -24.0, scale: 1.0, size: (54.0, 64.0) };
-
-/// Standing head up with nothing to spray: the all-clear screen's can.
-pub const REST: Pose = Pose { origin: (33.0, 70.0), degrees: 180.0, scale: 1.3, size: (37.0, 83.0) };
 
 impl Pose {
     /// A point of the can's own drawing, in the view's coordinates.

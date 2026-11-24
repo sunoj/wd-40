@@ -85,7 +85,6 @@ pub fn run(dir: &str, appearance: &str) {
 fn stage(mtm: objc2_foundation::MainThreadMarker) {
     stage_crowd();
     with_state(|state| {
-        state.open.insert(crate::scan_calm::LIST);
         state.open.extend(wd40::scanner::ArtifactGroup::ALL.iter().map(|group| group.key()));
     });
     crate::surface::refresh(mtm);

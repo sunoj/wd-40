@@ -121,12 +121,12 @@ fn run_list(dir: &str, appearance: &str) {
         note_window(crate::popover::content_view());
     }));
     shoot("popover");
-    let calm = matches!(std::env::var("WD40_CROWD").as_deref(), Ok("real" | "clear"));
-    match calm {
-        true => run_on_main(|| on_main(|mtm| crate::actions::toggle_fold(usize::MAX, mtm))),
+    let clear = matches!(std::env::var("WD40_CROWD").as_deref(), Ok("real" | "clear"));
+    match clear {
+        true => run_on_main(|| on_main(|mtm| crate::actions::toggle_fold(0, mtm))),
         false => run_on_main(press_tick_old),
     }
-    shoot(if calm { "popover-listed" } else { "popover-ticked" });
+    shoot(if clear { "popover-unfolded" } else { "popover-ticked" });
     run_on_main(|| on_main(|mtm| {
         with_state(|state| state.open.clear());
         window::open(mtm);

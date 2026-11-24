@@ -43,15 +43,12 @@ pub struct Group {
 pub struct Scan {
     pub theme: Theme,
     pub header: Zone,
-    /// The verdict line under the header's legend; empty on the calm screen.
+    /// The verdict line under the header's legend.
     pub verdict: Zone,
     pub footer: Zone,
     pub rows: Vec<Row>,
     pub groups: Vec<Group>,
     pub membership: Membership,
-    /// Built as the all-clear screen. A state that no longer agrees needs a
-    /// rebuild, not a patch: the two screens share no rows.
-    pub calm: bool,
     /// The window's map of the same targets; the popover has none.
     pub map: Option<Retained<crate::usage_map::MapView>>,
 }
@@ -113,7 +110,7 @@ pub fn sizes_arrived(arrived: &[usize], mtm: MainThreadMarker) -> bool {
     patch(UiScreen::Scan, |state, target| {
         SCAN.with(|cell| {
             let held = cell.borrow();
-            let Some(scan) = held.as_ref().filter(|scan| scan.calm == crate::scan_calm::calm(state)) else { return false };
+            let Some(scan) = held.as_ref() else { return false };
             let max_size = largest(state);
             for row in &scan.rows {
                 let Some(bytes) = state.measured.contains(&row.index).then(|| {
@@ -153,7 +150,7 @@ pub fn scan_matches(state: &AppState) -> bool {
     SCAN.with(|cell| {
         cell.borrow()
             .as_ref()
-            .is_some_and(|scan| scan.calm == crate::scan_calm::calm(state) && scan.membership == crate::scan_view::membership(state))
+            .is_some_and(|scan| scan.membership == crate::scan_view::membership(state))
     })
 }
 
@@ -163,7 +160,7 @@ pub fn selection_changed(mtm: MainThreadMarker) -> bool {
     patch(UiScreen::Scan, |state, target| {
         SCAN.with(|cell| {
             let held = cell.borrow();
-            let Some(scan) = held.as_ref().filter(|scan| scan.calm == crate::scan_calm::calm(state)) else { return false };
+            let Some(scan) = held.as_ref() else { return false };
             for row in &scan.rows {
                 let on = state.selected.contains(&row.index);
                 row.check.set(crate::selection::GroupSelection::from(on), &scan.theme);
@@ -191,7 +188,7 @@ pub fn totals_changed(mtm: MainThreadMarker) -> bool {
     patch(UiScreen::Scan, |state, target| {
         SCAN.with(|cell| {
             let held = cell.borrow();
-            let Some(scan) = held.as_ref().filter(|scan| scan.calm == crate::scan_calm::calm(state)) else { return false };
+            let Some(scan) = held.as_ref() else { return false };
             redraw_scan_frame(scan, state, target, mtm);
             true
         })
@@ -206,7 +203,7 @@ pub fn chrome_changed(mtm: MainThreadMarker) -> bool {
     patch(UiScreen::Scan, |state, target| {
         SCAN.with(|cell| {
             let held = cell.borrow();
-            let Some(scan) = held.as_ref().filter(|scan| scan.calm == crate::scan_calm::calm(state)) else { return false };
+            let Some(scan) = held.as_ref() else { return false };
             redraw_scan_header(scan, state, target, mtm);
             for row in &scan.rows {
                 if let Some(found) = state.targets.get(row.index) {
@@ -261,10 +258,8 @@ fn redraw_scan_header(scan: &Scan, state: &AppState, target: &AnyObject, mtm: Ma
 
 /// The verdict line alone: a tick changes what it says, and nothing above it.
 fn redraw_verdict(scan: &Scan, state: &AppState, target: &AnyObject, mtm: MainThreadMarker) {
-    if !scan.calm {
-        let verdict = crate::scan_verdict::verdict(state);
-        scan.verdict.repaint(|view, _| crate::scan_verdict::draw(view, &verdict, &scan.theme, target, mtm));
-    }
+    let verdict = crate::scan_verdict::verdict(state);
+    scan.verdict.repaint(|view, _| crate::scan_verdict::draw(view, &verdict, &scan.theme, target, mtm));
 }
 
 fn redraw_scan_frame(scan: &Scan, state: &AppState, target: &AnyObject, mtm: MainThreadMarker) {

@@ -36,7 +36,6 @@ mod pace;
 mod plate;
 mod popover;
 mod reveal;
-mod scan_calm;
 mod scan_footer;
 mod scan_rows;
 mod scan_verdict;
@@ -145,11 +144,6 @@ define_class!(
         #[unsafe(method(handleDoneAck:))]
         fn handle_done_ack(&self, _sender: &AnyObject) {
             actions::done_ack(self.mtm());
-        }
-
-        #[unsafe(method(handleToggleList:))]
-        fn handle_toggle_list(&self, _sender: &AnyObject) {
-            actions::toggle_fold(usize::MAX, self.mtm());
         }
 
         #[unsafe(method(handleRescan:))]

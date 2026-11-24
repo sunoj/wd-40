@@ -138,7 +138,7 @@ pub fn draw_group_header(
         false => model.count.to_string(),
     };
     let count_w = widgets::fitted_width(&count, 10.5, true, mtm);
-    widgets::add_fill(&host, chip_x, 5.0, count_w + 10.0, 17.0, theme.surface_2, 1.0, 4.0, mtm);
+    widgets::add_fill(&host, chip_x, 5.0, count_w + 10.0, 17.0, theme.surface_3, 1.0, 4.0, mtm);
     label(&host, &count, chip_x + 5.0, 6.0, count_w + 2.0, 15.0, 10.5, false, theme.ink_3, true, mtm);
     if model.clear {
         label(&host, "\u{2713}", chip_x + 18.0 + count_w, 5.0, 16.0, 16.0, 12.5, true, theme.ok, false, mtm);

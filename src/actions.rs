@@ -18,18 +18,15 @@ pub fn row_clicked(tag: isize, mtm: MainThreadMarker) {
     }
 }
 
-/// Fold or unfold one group, or (past the last group) the all-clear screen's
-/// list. The outer list keeps its place; only this group's rows come or go.
+/// Fold or unfold one group. The outer list keeps its place; only this
+/// group's rows come or go.
 pub fn toggle_fold(index: usize, mtm: MainThreadMarker) {
-    let key = ArtifactGroup::ALL.get(index).map_or(crate::scan_calm::LIST, |group| group.key());
+    let Some(key) = ArtifactGroup::ALL.get(index).map(|group| group.key()) else { return };
     with_state(|state| {
         if !state.open.remove(key) {
             state.open.insert(key);
         }
     });
-    if key == crate::scan_calm::LIST {
-        crate::scrolling::reset_scroll();
-    }
     crate::surface::refresh(mtm);
 }
 
