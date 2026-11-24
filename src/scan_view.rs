@@ -1,13 +1,14 @@
 // Scan-results screen: grouped selectable targets and the clean CTA. One column
-// in the popover; a sidebar and the full list in the window.
+// in the popover; the same column beside the usage map in the window.
 // Exports: `build`, `draw_footer`, `header_model`, the screen's tags.
 // Deps: crate::{controls, header, live, menu_rows, scan_rows, state, widgets}.
 
-use crate::can::{can_view, STANDING};
-use crate::layout::{self, content_w, panel_w, with_width, POPOVER_WIDTH};
+use crate::layout::{self, content_w, panel_w};
+use crate::usage_map;
 use crate::controls::{clean_button, set_cmd_key, text_button_hint, text_button_underlined, CleanCta};
 use crate::header::{self, scan_size, ScanHeader};
-use crate::live::{self, Group, Row, Scan, Zone};
+use crate::live::{self, Group, Row, Scan};
+use crate::zone::Zone;
 use crate::menu_rows::{plan_groups, GroupPlan};
 use crate::names::display_names;
 use crate::scan_rows::{self, GroupModel, RowModel, GROUP_H, ROW_H};
@@ -21,7 +22,7 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::sel;
 use objc2_app_kit::NSView;
-use objc2_foundation::{MainThreadMarker, NSPoint};
+use objc2_foundation::MainThreadMarker;
 use wd40::disk::sum_bytes;
 use wd40::scanner::sizes_may_overlap;
 
@@ -68,30 +69,28 @@ fn build_stacked(state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainT
     let (header, footer) = draw_frame(&root, height, state, theme, target, mtm);
     let list = crate::scrolling::scroll_document_view(&root, 0.0, footer_h(state), panel_w(), body_h, list_h, mtm);
     let (rows, groups) = draw_list(&list, state, &plans, list_h, theme, target, mtm);
-    live::install_scan(Scan { theme: *theme, header, footer, rows, groups, membership: membership(state), list_w: panel_w() });
+    live::install_scan(Scan { theme: *theme, header, footer, rows, groups, membership: membership(state), map: None });
     (root, height)
 }
 
-/// The window: the popover's header and footer as a sidebar with the can
-/// between them, and every row of the list in the room to the right.
+/// The window: the popover's column at full height with every row in it, and
+/// beside it the usage map — the same targets as tiles, sized by their bytes.
 fn build_wide(state: &AppState, theme: &Theme, target: &AnyObject, width: f64, height: f64, mtm: MainThreadMarker) -> Retained<NSView> {
     let empty = state.empty_targets();
     let plans = plan_groups(&state.targets, &empty, row_limit(state));
     let root = widgets::root_view(width, height, theme, mtm);
-    let side = POPOVER_WIDTH;
-    add_fill(&root, side, 0.0, 1.0, height, theme.line, 1.0, 0.0, mtm);
+    add_fill(&root, panel_w(), 0.0, 1.0, height, theme.line, 1.0, 0.0, mtm);
     let (header, footer) = draw_frame(&root, height, state, theme, target, mtm);
-    let (w, h) = STANDING.size;
-    let (floor, ceiling) = (footer_h(state), height - header::SCAN_HEADER_HEIGHT);
-    if ceiling - floor >= h + 32.0 {
-        let at = NSPoint::new((side - w) / 2.0, floor + (ceiling - floor - h) / 2.0);
-        root.addSubview(&can_view(STANDING, at, mtm));
-    }
-    let list_w = width - side - 1.0;
-    let (body_h, list_h) = (height - widgets::STRIPE_H, measure_list(&plans));
-    let list = crate::scrolling::scroll_document_view(&root, side + 1.0, 0.0, list_w, body_h, list_h, mtm);
-    let (rows, groups) = with_width(list_w, || draw_list(&list, state, &plans, list_h.max(body_h), theme, target, mtm));
-    live::install_scan(Scan { theme: *theme, header, footer, rows, groups, membership: membership(state), list_w });
+    let body_h = height - header::SCAN_HEADER_HEIGHT - footer_h(state);
+    let list_h = measure_list(&plans);
+    let list = crate::scrolling::scroll_document_view(&root, 0.0, footer_h(state), panel_w(), body_h, list_h, mtm);
+    let (rows, groups) = draw_list(&list, state, &plans, list_h.max(body_h), theme, target, mtm);
+    let frame = layout::map_frame(width, height);
+    usage_map::draw_key(&root, state, frame, theme, mtm);
+    let legend = label(&root, "", frame.origin.x, frame.origin.y - 26.0, frame.size.width, 16.0, 11.5, false, theme.ink_2, true, mtm);
+    let map = usage_map::usage_map(frame, state, legend, theme.dark, mtm);
+    root.addSubview(&map);
+    live::install_scan(Scan { theme: *theme, header, footer, rows, groups, membership: membership(state), map: Some(map) });
     root
 }
 

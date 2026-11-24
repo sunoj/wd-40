@@ -1,14 +1,19 @@
 // The rust crust: where on the plate it lies, what share of the volume it
 // stands for, and how the plate's two layers are painted — the steel underneath, once, and a patch
 // of rust per target, each in its own view.
-// Exports: `crust_region`, `share_line`, `paint_steel`, `paint_tile`, `PLATE_H`.
+// Exports: `crust_region`, `share_line`, `group_tone`, `paint_steel`,
+// `paint_tile`, `Tone`, `PLATE_H`.
 // Deps: crate::{metal, treemap}, objc2 AppKit.
 
 use crate::metal::{brushed, grey, inset, outline, rings, rnd};
-use crate::treemap::{rust_tone, Tile, ACTIVE, PENDING};
+use crate::theme::hex;
+use crate::treemap::{ACTIVE, IDLE, PENDING};
 use objc2_app_kit::{NSBezierPath, NSColor};
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 use wd40::disk::DiskSpace;
+use wd40::scanner::ArtifactGroup;
+
+pub type Tone = (f64, f64, f64);
 
 /// Height of the plate in the popover. The window gives it what room it has.
 pub const PLATE_H: f64 = 190.0;
@@ -45,10 +50,23 @@ fn share_text(fraction: f64) -> String {
     }
 }
 
+/// One colour per group, so the map reads by kind as well as by size. Rust
+/// targets are rust; the rest take the can's own colours and their neighbours.
+pub fn group_tone(group: ArtifactGroup) -> Tone {
+    hex(match group {
+        ArtifactGroup::Rust => 0xB5521F,
+        ArtifactGroup::NodeModules => 0xC99A1E,
+        ArtifactGroup::BuildOutput => 0x3F5FB0,
+        ArtifactGroup::Caches => 0x3F8C86,
+        ArtifactGroup::Simulators => 0x7B5BA6,
+        ArtifactGroup::Toolchains => 0x9A3B34,
+    })
+}
+
 /// The plate itself: brushed steel, its turning marks, and the footprint of
-/// every target scribed into it. The rust tiles sit over the footprints, so a
-/// scribe line only shows once its target has really gone. Painted once.
-pub fn paint_steel(bounds: NSRect, dark: bool, tiles: &[Tile]) {
+/// every tile scribed into it. The tiles sit over the footprints, so a scribe
+/// line only shows once its target has really gone. Painted once.
+pub fn paint_steel(bounds: NSRect, dark: bool, footprints: &[NSRect]) {
     NSBezierPath::bezierPathWithRoundedRect_xRadius_yRadius(bounds, 10.0, 10.0).addClip();
     brushed(bounds, dark);
     let centre = NSPoint::new(bounds.size.width / 2.0, bounds.size.height / 2.0);
@@ -56,8 +74,8 @@ pub fn paint_steel(bounds: NSRect, dark: bool, tiles: &[Tile]) {
     // window's plate they would otherwise swallow it.
     rings(centre, (bounds.size.height * 0.44).min(RINGS), dark);
     grey(if dark { 0.9 } else { 0.2 }, 0.22).setStroke();
-    for tile in tiles {
-        outline(inset(tile.rect, 1.5), 1.0);
+    for rect in footprints {
+        outline(inset(*rect, 1.5), 1.0);
     }
     NSColor::colorWithSRGBRed_green_blue_alpha(0.11, 0.1, 0.09, 0.16).setStroke();
     let edge = NSBezierPath::bezierPathWithRoundedRect_xRadius_yRadius(inset(bounds, 0.5), 9.5, 9.5);
@@ -65,33 +83,41 @@ pub fn paint_steel(bounds: NSRect, dark: bool, tiles: &[Tile]) {
     edge.stroke();
 }
 
-/// One target's patch of rust, filling its own view. The one being removed
-/// right now carries a bright rim; one the run left behind is hatched, so it
-/// does not read as work still queued.
-pub fn paint_tile(bounds: NSRect, index: usize, state: u8) {
+/// One tile of crust, filling its own view, in its group's colour. The one
+/// being removed right now carries a bright rim; one the run left behind is
+/// hatched; one that is not ticked, or not in the job, is flat and unpitted.
+pub fn paint_tile(bounds: NSRect, tone: Tone, index: usize, state: u8) {
     // Pits near an edge would otherwise spill onto the steel beside the tile.
     NSBezierPath::bezierPathWithRect(bounds).addClip();
-    let (r, g, b) = rust_tone(index);
-    NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, 1.0).setFill();
+    // Neighbours of one group differ a little, so their seams can be seen.
+    let shade = 0.9 + 0.1 * ((index % 4) as f64 / 3.0);
+    NSColor::colorWithSRGBRed_green_blue_alpha(tone.0 * shade, tone.1 * shade, tone.2 * shade, 1.0).setFill();
     NSBezierPath::fillRect(bounds);
-    let mut seed = 0x9e37_79b9_u32 ^ (index as u32).wrapping_mul(2_654_435_761);
-    let pits = ((bounds.size.width * bounds.size.height / 220.0) as usize).clamp(6, 90);
-    for _ in 0..pits {
-        let cx = rnd(&mut seed) * bounds.size.width;
-        let cy = rnd(&mut seed) * bounds.size.height;
-        let (pr, pg, pb) = if rnd(&mut seed) > 0.5 { (0.769, 0.529, 0.31) } else { (0.29, 0.173, 0.106) };
-        NSColor::colorWithSRGBRed_green_blue_alpha(pr, pg, pb, 0.1 + rnd(&mut seed) * 0.26).setFill();
-        crate::metal::circle_path(NSPoint::new(cx, cy), 1.5 + rnd(&mut seed) * 5.5).fill();
+    if state != IDLE {
+        pits(bounds, index);
     }
-    NSColor::colorWithSRGBRed_green_blue_alpha(0.118, 0.067, 0.035, 0.55).setStroke();
+    grey(0.05, 0.5).setStroke();
     outline(inset(bounds, 0.5), 1.0);
     match state {
         ACTIVE => {
-            NSColor::colorWithSRGBRed_green_blue_alpha(1.0, 0.94, 0.86, 0.85).setStroke();
+            NSColor::colorWithSRGBRed_green_blue_alpha(1.0, 0.96, 0.9, 0.9).setStroke();
             outline(inset(bounds, 1.5), 2.0);
         }
-        PENDING => {}
+        PENDING | IDLE => {}
         _ => hatch(bounds),
+    }
+}
+
+/// The crust's texture: light and dark pits, the same every time it is drawn.
+fn pits(bounds: NSRect, index: usize) {
+    let mut seed = 0x9e37_79b9_u32 ^ (index as u32).wrapping_mul(2_654_435_761);
+    let count = ((bounds.size.width * bounds.size.height / 220.0) as usize).clamp(6, 90);
+    for _ in 0..count {
+        let cx = rnd(&mut seed) * bounds.size.width;
+        let cy = rnd(&mut seed) * bounds.size.height;
+        let light = rnd(&mut seed) > 0.5;
+        grey(if light { 1.0 } else { 0.0 }, 0.06 + rnd(&mut seed) * 0.16).setFill();
+        crate::metal::circle_path(NSPoint::new(cx, cy), 1.5 + rnd(&mut seed) * 5.5).fill();
     }
 }
 
@@ -114,6 +140,9 @@ mod tests {
     use super::{crust_region, share_line, share_text, PLATE_H, RIM};
     use objc2_foundation::NSSize;
     use wd40::disk::DiskSpace;
+use wd40::scanner::ArtifactGroup;
+
+pub type Tone = (f64, f64, f64);
 
     fn disk(total: u64) -> Option<DiskSpace> {
         Some(DiskSpace { free_bytes: total / 2, total_bytes: total })

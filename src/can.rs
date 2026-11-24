@@ -1,8 +1,7 @@
 // Our can, drawn from the app icon: blue glass body under a yellow label band,
 // silver crimps and a tapered shoulder, red head and straw. It is painted once
-// into its own view, so moving it across the plate never repaints it; the same
-// view, larger and stood on its base, is the mark in the window's sidebar.
-// Exports: `can_view`, `Pose`, `SPRAY`, `STANDING`. Deps: objc2 AppKit.
+// into its own view, so moving it across the plate never repaints it.
+// Exports: `can_view`, `Pose`, `SPRAY`. Deps: objc2 AppKit.
 
 use objc2::rc::Retained;
 use objc2::{define_class, msg_send, DefinedClass, MainThreadOnly};
@@ -98,8 +97,6 @@ pub struct Pose {
 /// Held over the plate, leaning back from the point it sprays: the straw tip
 /// lands on `SPRAY.tip()` in the view's own coordinates.
 pub const SPRAY: Pose = Pose { origin: (4.0, 13.0), degrees: -24.0, scale: 1.0, size: (54.0, 64.0) };
-/// Stood on its base, head up, three times the size.
-pub const STANDING: Pose = Pose { origin: (75.0, 160.5), degrees: 180.0, scale: 3.0, size: (84.0, 190.0) };
 
 impl Pose {
     /// A point of the can's own drawing, in the view's coordinates.
@@ -239,7 +236,7 @@ fn poly(can: &Pose, points: &[(f64, f64)]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Pose, BODY_X, BODY_Y, HEAD_X, HEAD_Y, RIM_BASE_Y, SPRAY, STANDING, TIP_X, TIP_Y};
+    use super::{Pose, BODY_X, BODY_Y, HEAD_X, HEAD_Y, RIM_BASE_Y, SPRAY, TIP_X, TIP_Y};
 
     fn inside(pose: &Pose, x: f64, y: f64) -> bool {
         let at = pose.map(x, y);
@@ -255,7 +252,7 @@ mod tests {
             (TIP_X.0, TIP_Y.0), (TIP_X.1, TIP_Y.0), (HEAD_X.0, HEAD_Y.0), (HEAD_X.1, HEAD_Y.0),
             (HEAD_X.0, HEAD_Y.1), (BODY_X.1, BODY_Y.0), (BODY_X.0, RIM_BASE_Y.1), (BODY_X.1, RIM_BASE_Y.1),
         ];
-        for pose in [SPRAY, STANDING] {
+        for pose in [SPRAY] {
             for (x, y) in outline {
                 assert!(inside(&pose, x, y), "({x}, {y}) falls outside");
             }

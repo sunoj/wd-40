@@ -34,14 +34,10 @@ pub fn maybe_start() {
         run_on_main(|| resize(1180.0, 720.0));
         pause(500);
         run_on_main(clean);
-        pause(150);
-        run_on_main(|| resize(900.0, 600.0));
-        // The cleaning screen holds for its minimum time, then hands over.
-        for _ in 0..150 {
-            pause(200);
-            if with_done() {
-                break;
-            }
+        // A frame every 60ms for as long as the cleaning screen is up.
+        while !with_done() {
+            pause(60);
+            run_on_main(sample);
         }
         run_on_main(close);
         pause(500);
@@ -61,9 +57,29 @@ fn with_done() -> bool {
 /// Open the window the way the popover's button and the status menu do: by
 /// sending the handler its action.
 fn open() {
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    if std::env::var_os("WD40_SMOKE_POPOVER").is_some() {
+        crate::popover::ensure_open(mtm);
+        return eprintln!("smoke: popover opened, shown={}", crate::popover::is_shown());
+    }
     let Some(handler) = crate::HANDLER.with(|cell| cell.borrow().clone()) else { return };
     let _: () = unsafe { msg_send![&*handler, openWindow: &*handler] };
-    eprintln!("smoke: openWindow: sent, visible={}", window::is_visible());
+    let number = window::content_view(mtm).and_then(|view| view.window()).map_or(0, |window| window.windowNumber());
+    eprintln!("smoke: openWindow: sent, visible={}, window number {number}", window::is_visible());
+}
+
+/// One line per frame: when it was taken, how many targets have really gone,
+/// and where the render tree has the can and each tile at that instant.
+fn sample() {
+    let Some(plate) = crate::live::clean_plate() else { return };
+    let gone = with_state_ret(|state| state.cleaning.as_ref().map_or(0, |run| run.done_count)).unwrap_or(0);
+    eprintln!("frame t={:>5}ms gone={gone} {}", clock(), plate.sample());
+}
+
+/// Milliseconds since the run started.
+fn clock() -> u128 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed().as_millis()
 }
 
 /// Resize the window, which rebuilds whatever screen is up at the new size.
@@ -98,13 +114,13 @@ fn clean() {
     }
     surface::refresh(mtm);
     tasks::spawn_clean_selected();
-    eprintln!("smoke: clean started, screen is cleaning={}", on_screen(UiScreen::Cleaning));
+    eprintln!("smoke: clean started at t={}ms, screen is cleaning={}", clock(), on_screen(UiScreen::Cleaning));
 }
 
 fn close() {
     let Some(mtm) = MainThreadMarker::new() else { return };
     let freed = with_state_ret(|state| state.done.as_ref().map(|done| done.freed_bytes)).flatten();
-    eprintln!("smoke: done screen={}, summary freed={freed:?}", on_screen(UiScreen::Done));
+    eprintln!("smoke: done screen={} at t={}ms, summary freed={freed:?}", on_screen(UiScreen::Done), clock());
     let paints = crate::plate::STEEL_PAINTS.load(Ordering::Relaxed);
     eprintln!("smoke: plate steel painted {paints} time(s) during the run");
     // The close button's own path, through the delegate's windowShouldClose:.

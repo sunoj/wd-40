@@ -2,9 +2,11 @@
 // window lays the same screens out in wider panes. Builders read the width from
 // here instead of a constant, and a `live::Zone` re-enters the width it was
 // built at before it repaints.
-// Exports: `panel_w`, `content_w`, `with_width`, `window_size`, `with_window`.
+// Exports: `panel_w`, `content_w`, `with_width`, `window_size`, `with_window`,
+// `map_frame`.
 
 use crate::widgets::PAD_X;
+use objc2_foundation::{NSPoint, NSRect, NSSize};
 use std::cell::Cell;
 
 /// The popover's fixed width, and the width of any pane nobody has resized.
@@ -46,4 +48,16 @@ pub fn with_window<R>(size: Option<(f64, f64)>, body: impl FnOnce() -> R) -> R {
     let out = body();
     WINDOW.with(|cell| cell.set(before));
     out
+}
+
+/// Where the window puts its map: everything right of the popover-wide column,
+/// inside a margin, with a line of room above for the colour key and below for
+/// the legend. The scan map and the cleaning plate both use exactly this
+/// frame, which is what makes one hand over to the other without a jump.
+pub fn map_frame(width: f64, height: f64) -> NSRect {
+    const MARGIN: f64 = 22.0;
+    const LINE: f64 = 26.0;
+    let x = POPOVER_WIDTH + 1.0 + MARGIN;
+    let y = MARGIN + LINE;
+    NSRect::new(NSPoint::new(x, y), NSSize::new(width - x - MARGIN, height - y - MARGIN - LINE))
 }

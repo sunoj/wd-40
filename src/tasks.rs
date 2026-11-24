@@ -376,8 +376,10 @@ pub fn on_clean_done(mtm: MainThreadMarker) {
     // the counts, the bar and the plate all read done because they are.
     let settled = PROGRESS.lock().unwrap().clone();
     with_state(|state| state.cleaning = settled);
+    // Patch first, so the wait below covers the lifts this tick queues.
+    let patched = live::progress_changed(mtm);
     let Some(seconds) = hold_left() else { return show_result(mtm) };
-    if !live::progress_changed(mtm) {
+    if !patched {
         crate::surface::refresh(mtm);
     }
     schedule(&HOLD_TIMER, seconds, sel!(cleanHoldTick:), false);
@@ -391,7 +393,8 @@ fn hold_left() -> Option<f64> {
         return None;
     }
     let shown = (*CLEAN_SHOWN.lock().unwrap())?;
-    let left = MIN_CLEAN_SCREEN - shown.elapsed().as_secs_f64();
+    // The plate may be behind the job: wait for its last lift to play.
+    let left = (MIN_CLEAN_SCREEN - shown.elapsed().as_secs_f64()).max(live::lifts_left() + 0.3);
     (left > 0.05).then_some(left)
 }
 

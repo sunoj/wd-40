@@ -51,10 +51,29 @@ key equivalents of the buttons that show them.
 The popover is 380pt wide and each screen is one column. Builders read the
 pane width from `src/layout.rs` rather than a constant.
 
-In the window, scan and cleaning use a sidebar the width of the popover (disk
-gauge, progress, the clean or stop button) and give the rest to the list or to
-the cleaning plate. The scan list shows every row; the popover folds each group
-after six. Done and settings are the popover's column, centred as a card.
+In the window, scan and cleaning keep the popover's column on the left at full
+height and give the rest to the usage map: a treemap of every target, sized by
+its bytes and coloured by its group.
+
+- Scan: the column is the disk gauge, the whole list (the popover folds each
+  group after six rows) and the clean button. On the map a ticked target is
+  solid and an unticked one faint; a click on a tile ticks it, exactly as its
+  row does, and the line under the map names the tile under the pointer.
+- Cleaning: the column is the progress figures and a line per target with its
+  status. The plate is the scan map itself, in the same frame with the same
+  tiles (`layout::map_frame`, `treemap::cells`), so the picture does not jump
+  when a clean starts. Targets outside the job stay faint and never move.
+- Done and settings are the popover's column, centred as a card.
+
+## Cleaning animation and the done screen
+
+The plate plays removals one at a time: the can crosses to a tile, then the
+tile rises off the steel. A tile joins the queue only when its target's removal
+has finished, so the plate can be behind the job and is never ahead of it. A
+backlog plays faster (down to half length per lift) but no lift is skipped.
+The done screen waits for the queue to drain (`live::lifts_left`); "Show the
+result" skips the wait. With Reduce Motion on there is no queue and no wait:
+each tile is simply gone when its target is.
 
 Layout is frame-based, so the window rebuilds the current screen when it is
 resized and when the system appearance changes.

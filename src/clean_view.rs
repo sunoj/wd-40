@@ -1,19 +1,21 @@
-// Cleaning-progress screen: disk header, job progress, and the rust plate that
-// lifts a tile as each target is really removed. Stacked in the popover; in the
-// window the figures form a sidebar and the plate takes the rest of the room.
+// Cleaning-progress screen: disk header, job progress, and the plate that lifts
+// a tile as each target is really removed. Stacked in the popover; in the
+// window the figures and a line per target form a column beside the scan map.
 // Exports: `build`, `TAG_STOP`, and the zone painters `live` calls each tick.
-// Deps: crate::{can, controls, crust, header, layout, live, pace, plate, state, widgets}.
+// Deps: crate::{clean_list, controls, crust, header, layout, live, pace, plate, tile, usage_map}.
 
-use crate::can::{can_view, STANDING};
 use crate::controls::filled_button;
-use crate::crust::PLATE_H;
+use crate::crust::{group_tone, share_line, PLATE_H};
 use crate::header::{self, scan_size, HeaderModel};
 use crate::layout::{self, content_w, panel_w, POPOVER_WIDTH};
-use crate::live::{self, Clean, Zone};
+use crate::live::{self, Clean};
+use crate::zone::Zone;
 use crate::pace::{elapsed, eta_label};
 use crate::plate::{plate_view, PlateView};
 use crate::state::{AppState, CleanItemStatus, CleanProgress};
 use crate::theme::Theme;
+use crate::tile::{patches, Entry, Patch};
+use crate::{clean_list, usage_map};
 use crate::widgets::{self, add_fill, add_line, label, label_right, label_wrap, PAD_X};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
@@ -22,6 +24,7 @@ use objc2_app_kit::{NSTextField, NSView};
 use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize, NSString};
 use std::path::Path;
 use wd40::disk::sum_bytes;
+use wd40::scanner::ArtifactGroup;
 
 pub const TAG_STOP: isize = 2004;
 const STRIP_H: f64 = 46.0;
@@ -29,8 +32,6 @@ const STRIP_H: f64 = 46.0;
 const PLATE_BLOCK: f64 = PLATE_H + 46.0;
 const PATH_H: f64 = 42.0;
 const FOOTER_H: f64 = 78.0;
-/// Room the window leaves round its plate.
-const MARGIN: f64 = 24.0;
 
 /// Everything the screen is built from, so the two layouts share one signature.
 struct Parts<'a> {
@@ -50,48 +51,67 @@ pub fn build(state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainThrea
     }
 }
 
-/// The popover: header, progress, plate, path and button in one column.
+/// The popover: header, progress, plate, path and button in one column. The
+/// plate holds the job's own targets and nothing else.
 fn build_stacked(parts: &Parts) -> (Retained<NSView>, f64) {
     let height = header::HEADER_HEIGHT + STRIP_H + PLATE_BLOCK + PATH_H + FOOTER_H;
     let root = widgets::root_view(panel_w(), height, parts.theme, parts.mtm);
     let (header, strip, below) = draw_figures(&root, height, parts);
     let frame = NSRect::new(NSPoint::new(PAD_X, below - PLATE_BLOCK + 34.0), NSSize::new(content_w(), PLATE_H));
-    let plate = draw_plate(&root, frame, parts);
+    let plate = draw_plate(&root, frame, patches(&job_entries(parts), frame.size), parts);
     let (caption, path) = draw_path(&root, below - PLATE_BLOCK, parts);
     let footer = draw_footer_zone(&root, parts);
-    live::install_clean(Clean { theme: *parts.theme, header, strip, footer, caption, path, plate });
+    live::install_clean(Clean { theme: *parts.theme, header, strip, footer, caption, path, plate, list: None });
     (root, height)
 }
 
-/// The window: the popover's column, less the plate, as a sidebar, and the
-/// plate over everything to the right of it.
+/// The window: the popover's column with a line per target where the plate
+/// was, and beside it the scan map itself as the plate — every target where
+/// the scan drew it, the job's solid and the rest faint.
 fn build_wide(parts: &Parts, width: f64, height: f64) -> Retained<NSView> {
     let (theme, mtm) = (parts.theme, parts.mtm);
     let root = widgets::root_view(width, height, theme, mtm);
-    let side = POPOVER_WIDTH;
-    add_fill(&root, side, 0.0, 1.0, height, theme.line, 1.0, 0.0, mtm);
+    add_fill(&root, POPOVER_WIDTH, 0.0, 1.0, height, theme.line, 1.0, 0.0, mtm);
     let (header, strip, below) = draw_figures(&root, height, parts);
     let (caption, path) = draw_path(&root, below, parts);
     let footer = draw_footer_zone(&root, parts);
-    draw_mark(&root, FOOTER_H, below - PATH_H, mtm);
-    let frame = NSRect::new(
-        NSPoint::new(side + MARGIN, MARGIN + 26.0),
-        NSSize::new(width - side - MARGIN * 2.0, height - MARGIN * 2.0 - 26.0),
-    );
-    let plate = draw_plate(&root, frame, parts);
-    live::install_clean(Clean { theme: *theme, header, strip, footer, caption, path, plate });
+    let list = clean_list::build(&root, FOOTER_H, below - PATH_H, parts.progress, theme, mtm);
+    let frame = layout::map_frame(width, height);
+    usage_map::draw_key(&root, parts.state, frame, theme, mtm);
+    let plate = draw_plate(&root, frame, map_patches(parts, frame.size), parts);
+    live::install_clean(Clean { theme: *theme, header, strip, footer, caption, path, plate, list: Some(list) });
     root
 }
 
-/// The can, standing in whatever the sidebar has left between the figures and
-/// the button. Left out when there is not the room for the whole of it.
-fn draw_mark(root: &NSView, floor: f64, ceiling: f64, mtm: MainThreadMarker) {
-    let (w, h) = STANDING.size;
-    if ceiling - floor < h + 32.0 {
-        return;
+/// The job's items as map entries, each in its target's group colour.
+fn job_entries(parts: &Parts) -> Vec<Entry> {
+    let targets = &parts.state.targets;
+    parts
+        .progress
+        .items
+        .iter()
+        .map(|item| Entry {
+            name: item.name.clone(),
+            path: String::new(),
+            bytes: item.size_bytes,
+            tone: group_tone(targets.get(item.index).map_or(ArtifactGroup::Rust, |target| target.kind.group())),
+        })
+        .collect()
+}
+
+/// The scan map's own tiles, re-keyed from targets to the job's item slots. A
+/// tile none of whose targets is in the job keeps no members and stays faint.
+fn map_patches(parts: &Parts, size: NSSize) -> Vec<Patch> {
+    let items = &parts.progress.items;
+    let mut laid = patches(&usage_map::entries(parts.state), size);
+    for patch in laid.iter_mut() {
+        patch.members = patch
+            .members
+            .iter()
+            .filter_map(|target| items.iter().position(|item| item.index == *target))
+            .collect();
     }
-    let at = NSPoint::new((POPOVER_WIDTH - w) / 2.0, floor + (ceiling - floor - h) / 2.0);
-    root.addSubview(&can_view(STANDING, at, mtm));
+    laid
 }
 
 /// Disk header and progress strip, stacked down from `top`. Returns the zones
@@ -178,21 +198,16 @@ fn status_line(p: &CleanProgress) -> String {
 /// Bytes this job has not taken off the disk: what is still queued, what is
 /// running, and whatever a part-way removal left behind.
 fn left_bytes(p: &CleanProgress) -> u64 {
-    sum_bytes(
-        p.items
-            .iter()
-            .map(|item| item.size_bytes.saturating_sub(item.freed_bytes)),
-    )
+    sum_bytes(p.items.iter().map(|item| item.size_bytes.saturating_sub(item.freed_bytes)))
 }
 
 /// The plate at `frame`, with its legend line directly under it.
-fn draw_plate(root: &NSView, frame: NSRect, parts: &Parts) -> Retained<PlateView> {
-    let (theme, mtm) = (parts.theme, parts.mtm);
-    let legend = label(
-        root, "", frame.origin.x, frame.origin.y - 26.0, frame.size.width, 16.0, 11.5, false,
-        theme.ink_2, true, mtm,
-    );
-    let view = plate_view(frame, parts.progress, parts.state.disk_stats(), legend, theme.dark, mtm);
+fn draw_plate(root: &NSView, frame: NSRect, laid: Vec<Patch>, parts: &Parts) -> Retained<PlateView> {
+    let (theme, mtm, progress) = (parts.theme, parts.mtm, parts.progress);
+    let legend = label(root, "", frame.origin.x, frame.origin.y - 26.0, frame.size.width, 16.0, 11.5, false, theme.ink_2, true, mtm);
+    let job = sum_bytes(progress.items.iter().map(|item| item.size_bytes));
+    let share = share_line(job, parts.state.disk_stats());
+    let view = plate_view(frame, laid, progress, share, legend, theme.dark, mtm);
     root.addSubview(&view);
     view
 }

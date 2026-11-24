@@ -43,6 +43,8 @@ fn badge_x() -> f64 {
 /// The second line, which the pointer turns into the row's path. It stops short
 /// of the RECENT badge where there is one, and of the size where there is not.
 const DETAIL_X: f64 = PAD_X + 26.0;
+/// Thickness of the size meter along the bottom of a row.
+const METER_H: f64 = 2.5;
 fn name_w() -> f64 {
     size_x() - DETAIL_X - 4.0
 }
@@ -61,7 +63,7 @@ pub struct RowModel<'a> {
     pub name: &'a str,
     pub target: &'a TargetDir,
     pub measured: bool,
-    /// Largest settled size on screen, which the wash is drawn against.
+    /// Largest settled size on screen, which the meter is drawn against.
     pub max_size: u64,
     pub on: bool,
     pub max_age_days: u64,
@@ -95,11 +97,13 @@ fn detail_width(recent: bool) -> f64 {
     stop - DETAIL_X - 6.0
 }
 
-/// How wide the size wash is for `bytes` against the largest row on screen.
+/// The meter under a row: a thin bar from the text's left edge, as long as the
+/// row's size is of the largest on screen. It replaces a wash behind the whole
+/// row, which stepped down the list like a staircase and ran off its edge.
 pub fn wash_frame(bytes: u64, max_size: u64) -> NSRect {
     let fraction = bytes as f64 / max_size.max(1) as f64;
-    let width = (panel_w() * fraction.clamp(0.0, 1.0)).max(0.5);
-    NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(width, ROW_H))
+    let width = (name_w() * fraction.clamp(0.0, 1.0)).max(METER_H);
+    NSRect::new(NSPoint::new(DETAIL_X, 0.0), NSSize::new(width, METER_H))
 }
 
 pub fn draw_group_header(
@@ -151,9 +155,6 @@ pub fn draw_row(
     let y = y_top - ROW_H;
     let tag = crate::scan_view::TAG_ITEM_BASE + model.index as isize;
     let row = hover_row(parent, y, ROW_H, theme.surface_2, tag, mtm);
-    // Full row height, not inset. The mock insets it because nothing else sits
-    // behind the row; here the hover tint does, and a shorter wash on top of it
-    // banded every row into three tones.
     let wash = draw_wash(&row, model, theme, mtm);
     let check = checkbox(&row, GroupSelection::from(model.on), PAD_X, 13.0, sel!(handleToggleItem:), target, tag, theme, mtm);
     let name = label(&row, model.name, DETAIL_X, 18.0, name_w(), 16.0, 13.5, false, theme.ink, false, mtm);
@@ -202,11 +203,9 @@ fn draw_wash(
     theme: &Theme,
     mtm: MainThreadMarker,
 ) -> Retained<NSBox> {
-    let frame = match model.measured {
-        true => wash_frame(model.target.size_bytes, model.max_size),
-        false => NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.5, ROW_H)),
-    };
-    widgets::add_fill(row, 0.0, 0.0, frame.size.width, ROW_H, theme.accent, 0.09, 0.0, mtm)
+    let bytes = if model.measured { model.target.size_bytes } else { 0 };
+    let frame = wash_frame(bytes, model.max_size);
+    widgets::add_fill(row, frame.origin.x, frame.origin.y, frame.size.width, METER_H, theme.accent, 0.75, METER_H / 2.0, mtm)
 }
 
 fn meta(target: &TargetDir) -> String {

@@ -3,11 +3,12 @@
 ## [Unreleased]
 
 ### Added
-- **A resizable window** (`src/window.rs`, `src/surface.rs`): the same four screens as the popover, with the disk gauge and the clean button in a sidebar and every row of the list beside it. Open it with ⌘O or "Window" in the popover, or "Open WD-40 Window" on a right click of the menu bar item; ⌘W closes it. One surface is live at a time and the app has no Dock icon either way. See `docs/window-and-popover.md`.
+- **A resizable window** (`src/window.rs`, `src/surface.rs`, `src/usage_map.rs`): the same four screens as the popover, with the full list in a column and a usage map beside it: every target as a tile sized by its bytes and coloured by its group, solid when ticked, clickable to tick. The cleaning screen uses that same map as its plate. Open it with ⌘O or "Window" in the popover, or "Open WD-40 Window" on a right click of the menu bar item; ⌘W closes it. One surface is live at a time and the app has no Dock icon either way. See `docs/window-and-popover.md`.
 
 ### Changed
 - **New look** (`src/theme.rs`): the can's label colours on steel greys. Rust orange marks what can be reclaimed and what is ticked, the can's blue marks free space, the clean button is the label's yellow band, and every screen carries the label stripe along its top edge.
-- **The cleaning plate no longer runs a timer** (`src/plate.rs`, `src/crust.rs`, `src/can.rs`): the steel is painted once, each target is a rust tile of its own, and a tile lifts only when its target has really been removed, with the can moving to that tile. The crust now covers the whole plate; the job's share of the volume is given in the line under it. Pointer spraying, the mist and the wipe mask are gone.
+- **The cleaning plate plays each removal in turn** (`src/plate.rs`, `src/choreo.rs`, `src/tile.rs`): the steel is painted once, each target is a tile of its own, and when a target has really been removed the can crosses to its tile and the tile rises off the steel. Removals that land faster than that are queued and played one after another; the done screen waits for the last. There is no per-frame timer. The crust now covers the whole plate; the job's share of the volume is given in the line under it. Pointer spraying, the mist and the wipe mask are gone.
+- **Row size bars are a thin meter under each row** (`src/scan_rows.rs`) instead of a wash behind it, which stepped down the list and ran off its left edge.
 
 ### Fixed
 - **`release.sh` stops before building when the Keychain's Sparkle key is not the one `Info.plist` trusts** (`scripts/check-sparkle-key.sh`): 0.7.0 was first published with an EdDSA signature from a different key, and every installed copy reported "The update is improperly signed". The appcast was re-signed with the trusted key; the archives did not change.

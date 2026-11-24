@@ -49,7 +49,7 @@ impl CleanItemStatus {
 
 #[derive(Clone)]
 pub struct CleanItem {
-    #[allow(dead_code)]
+    /// Position in `AppState::targets` of the target this item removes.
     pub index: usize,
     pub name: String,
     pub size_bytes: u64,
