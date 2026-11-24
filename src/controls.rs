@@ -131,8 +131,6 @@ pub enum CleanCta {
     /// Sizes are still arriving; nothing may be armed against numbers that are
     /// still moving.
     Measuring,
-    /// Nothing is ticked.
-    Empty,
     Ready { count: usize, size: String },
 }
 
@@ -140,7 +138,6 @@ impl CleanCta {
     fn title(&self) -> String {
         match self {
             Self::Measuring => "Measuring\u{2026}".into(),
-            Self::Empty => "Tick what to clean".into(),
             Self::Ready { count, .. } => format!("Clean {count} selected"),
         }
     }

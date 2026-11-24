@@ -161,6 +161,11 @@ pub fn selection_changed(mtm: MainThreadMarker) -> bool {
         SCAN.with(|cell| {
             let held = cell.borrow();
             let Some(scan) = held.as_ref() else { return false };
+            // The clean button comes and goes with the first and last tick, and
+            // the footer's height with it: that takes a rebuild, not a patch.
+            if scan.footer.height() != crate::scan_footer::footer_h(state) + 1.0 {
+                return false;
+            }
             for row in &scan.rows {
                 let on = state.selected.contains(&row.index);
                 row.check.set(crate::selection::GroupSelection::from(on), &scan.theme);

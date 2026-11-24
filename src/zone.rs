@@ -36,6 +36,11 @@ impl Zone {
         with_width(self.width, || draw(&self.view, self.top));
     }
 
+    /// How tall the zone was built; a repaint cannot change it.
+    pub fn height(&self) -> f64 {
+        self.top
+    }
+
     /// Empty it and draw it again.
     pub fn repaint(&self, draw: impl FnOnce(&NSView, f64)) {
         for view in self.view.subviews().to_vec() {

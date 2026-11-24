@@ -20,9 +20,11 @@ const SHORTCUTS_H: f64 = 44.0;
 const CLEAN_H: f64 = 51.0;
 const RECEIPT_H: f64 = 20.0;
 
-pub fn footer_h(_state: &AppState) -> f64 {
+/// The clean button is there only while something is ticked: with nothing
+/// ticked the list itself is the prompt, and a greyed slab read as dead.
+pub fn footer_h(state: &AppState) -> f64 {
     SHORTCUTS_H
-        + CLEAN_H
+        + if state.selected.is_empty() { 0.0 } else { CLEAN_H }
         + if crate::auto_clean::receipt_line().is_some() { RECEIPT_H } else { 0.0 }
 }
 
@@ -35,8 +37,10 @@ pub fn draw_footer(
 ) {
     add_line(parent, 0.0, footer_h(state), panel_w(), theme.line, mtm);
     let mut line_y = footer_h(state) - 22.0;
-    clean_button(parent, &clean_cta(state), PAD_X, footer_h(state) - 47.0, content_w(), sel!(handleCleanSelected:), target, crate::scan_view::TAG_CLEAN, theme, mtm);
-    line_y -= CLEAN_H - 4.0;
+    if !state.selected.is_empty() {
+        clean_button(parent, &clean_cta(state), PAD_X, footer_h(state) - 47.0, content_w(), sel!(handleCleanSelected:), target, crate::scan_view::TAG_CLEAN, theme, mtm);
+        line_y -= CLEAN_H - 4.0;
+    }
     if let Some(receipt) = crate::auto_clean::receipt_line() {
         label(parent, &receipt, PAD_X, line_y, content_w(), 16.0, 11.0, false, theme.ink_3, false, mtm);
     }
@@ -54,9 +58,6 @@ pub fn draw_footer(
 fn clean_cta(state: &AppState) -> CleanCta {
     if state.sizing() || crate::tasks::is_scanning() {
         return CleanCta::Measuring;
-    }
-    if state.selected.is_empty() {
-        return CleanCta::Empty;
     }
     CleanCta::Ready {
         count: state.selected.len(),
