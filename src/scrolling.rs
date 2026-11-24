@@ -34,6 +34,7 @@ pub fn remember_scroll() {
 /// point into rows that no longer exist.
 pub fn reset_scroll() {
     SCROLL_TOP.set(0.0);
+    crate::group_scroll::forget();
 }
 
 #[allow(clippy::too_many_arguments)]

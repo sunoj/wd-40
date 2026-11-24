@@ -133,6 +133,8 @@ pub enum CleanCta {
     Measuring,
     /// Nothing is ticked.
     Empty,
+    /// Nothing is ticked because nothing is old enough to be worth ticking.
+    Clear { days: u64 },
     Ready { count: usize, size: String },
 }
 
@@ -141,6 +143,7 @@ impl CleanCta {
         match self {
             Self::Measuring => "Measuring\u{2026}".into(),
             Self::Empty => "Tick what to clean".into(),
+            Self::Clear { days } => format!("All clear \u{2014} nothing older than {days}d"),
             Self::Ready { count, .. } => format!("Clean {count} selected"),
         }
     }
@@ -182,8 +185,13 @@ pub fn clean_button(
     let armed = cta.armed();
     // The label's yellow band with its navy print — and nothing but grey until
     // there is something it would really remove.
-    let (fill, ink) = if armed { (theme.cta, theme.cta_ink) } else { (theme.surface_3, theme.ink_3) };
-    add_fill(parent, x, y, w, CTA_H, fill, 1.0, 8.0, mtm);
+    let (fill, ink, alpha) = match cta {
+        CleanCta::Ready { .. } => (theme.cta, theme.cta_ink, 1.0),
+        // Healthy, in green: a statement, not a button waiting to be armed.
+        CleanCta::Clear { .. } => (theme.ok, theme.ok, 0.16),
+        _ => (theme.surface_3, theme.ink_3, 1.0),
+    };
+    add_fill(parent, x, y, w, CTA_H, fill, alpha, 8.0, mtm);
     let title = cta.title();
     let title_w = fitted_width(&title, 13.5, false, mtm);
     let size_w = cta.size().map_or(0.0, |size| fitted_width(size, 12.5, true, mtm));

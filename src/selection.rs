@@ -51,6 +51,19 @@ fn in_old_batch(target: &TargetDir, max_age_days: u64) -> bool {
         && !is_recent(target, max_age_days)
 }
 
+/// True when no listed target — of `group`, or of any group — is past the keep
+/// threshold. This is the list's own per-row test, the one that folds a row
+/// away as recent, so a group reads as clear exactly when it would show no
+/// old rows. It is deliberately not `old_targets`: an old simulator is an old
+/// row even though the tick-old batch leaves it alone.
+pub fn nothing_old(targets: &[TargetDir], empty: &HashSet<usize>, group: Option<ArtifactGroup>, max_age_days: u64) -> bool {
+    !targets.iter().enumerate().any(|(index, target)| {
+        !empty.contains(&index)
+            && group.is_none_or(|group| target.kind.group() == group)
+            && !is_recent(target, max_age_days)
+    })
+}
+
 /// Nothing is checked after a scan. Deleting here is irreversible and skips the
 /// Trash, so a popover that opens already armed to delete is not a default
 /// anyone should be handed — the user opts in, per row or per group.
@@ -234,5 +247,28 @@ mod tests {
         let old = super::old_targets(&targets, &empty, 7);
         assert_eq!(old, std::collections::HashSet::from([2, 3, 4]));
         assert!(old.iter().all(|index| !super::is_recent(&targets[*index], 7)));
+    }
+
+    /// A group is clear exactly when it has no old rows, whatever tick-old
+    /// would do with them: old simulators keep their group from being clear.
+    #[test]
+    fn clear_follows_the_rows_not_the_tick_old_batch() {
+        use std::time::{Duration, SystemTime};
+        use wd40::scanner::{ArtifactGroup, ArtifactKind};
+        let at = |kind: ArtifactKind, days: u64| TargetDir {
+            path: std::path::PathBuf::from(format!("/w/{days}/x")),
+            size_bytes: 1,
+            last_modified: SystemTime::now() - Duration::from_secs(days * 86_400 + 60),
+            kind,
+        };
+        let none = std::collections::HashSet::new();
+        let targets = [at(ArtifactKind::RustTarget, 1), at(ArtifactKind::NodeModules, 2), at(ArtifactKind::Simulator, 90)];
+        assert!(super::nothing_old(&targets, &none, Some(ArtifactGroup::Rust), 7));
+        assert!(super::old_targets(&targets, &none, 7).is_empty());
+        assert!(!super::nothing_old(&targets, &none, Some(ArtifactGroup::Simulators), 7));
+        assert!(!super::nothing_old(&targets, &none, None, 7));
+        assert!(super::nothing_old(&targets[..2], &none, None, 7));
+        // An old target the list has dropped as empty is not a row either.
+        assert!(super::nothing_old(&targets, &std::collections::HashSet::from([2]), None, 7));
     }
 }

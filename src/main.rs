@@ -9,6 +9,8 @@ mod cache_names;
 mod can;
 #[cfg(debug_assertions)]
 mod capture;
+#[cfg(debug_assertions)]
+mod capture_group;
 mod checkbox;
 mod choreo;
 mod clean_list;
@@ -17,6 +19,7 @@ mod controls;
 mod crust;
 mod disk_gauge;
 mod done_view;
+mod group_scroll;
 mod header;
 mod header_legend;
 mod hover_row;

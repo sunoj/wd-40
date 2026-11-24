@@ -96,7 +96,9 @@ fn clean_cta(state: &AppState) -> CleanCta {
         return CleanCta::Measuring;
     }
     if state.selected.is_empty() {
-        return CleanCta::Empty;
+        let days = state.config.max_age_days;
+        let clear = !state.targets.is_empty() && crate::selection::nothing_old(&state.targets, &state.empty_targets(), None, days);
+        return if clear { CleanCta::Clear { days } } else { CleanCta::Empty };
     }
     CleanCta::Ready {
         count: state.selected.len(),

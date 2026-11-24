@@ -31,6 +31,8 @@ pub struct Theme {
     /// Can blue: free space and space won back.
     pub pos: (f64, f64, f64),
     pub warn: (f64, f64, f64),
+    /// Green: healthy, nothing to clean. Never used for bytes or free space.
+    pub ok: (f64, f64, f64),
     /// Label yellow and the navy printed on it: the primary button.
     pub cta: (f64, f64, f64),
     pub cta_ink: (f64, f64, f64),
@@ -61,6 +63,7 @@ impl Theme {
             accent_weak: hex(0xF6E4D8),
             pos: hex(CAN_BLUE),
             warn: hex(0x8F6400),
+            ok: hex(0x2E7D4F),
             cta: hex(CAN_YELLOW),
             cta_ink: hex(0x14244A),
             danger: hex(0xC2342A),
@@ -84,6 +87,7 @@ impl Theme {
             accent_weak: hex(0x3B271B),
             pos: hex(0x6F92E6),
             warn: hex(0xE0B341),
+            ok: hex(0x62C08A),
             cta: hex(CAN_YELLOW),
             cta_ink: hex(0x14244A),
             danger: hex(0xEA5A4E),

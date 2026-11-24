@@ -24,15 +24,17 @@ const SCREENS: [(&str, UiScreen); 4] = [
 
 /// Which capture is being staged, and the window's number once it is open.
 static STEP: AtomicUsize = AtomicUsize::new(0);
-static WINDOW: AtomicUsize = AtomicUsize::new(0);
+pub static WINDOW: AtomicUsize = AtomicUsize::new(0);
 
 /// Runs on its own thread: stage on the main thread, give the window server
 /// time to put it on screen, capture, move on.
 pub fn run() {
     let dir = std::env::var("WD40_SCREENSHOT_DIR").unwrap_or_default();
     let appearance = std::env::var("WD40_APPEARANCE").unwrap_or_else(|_| "light".into());
-    if std::env::var("WD40_CAPTURE_WINDOW").is_ok_and(|mode| mode == "list") {
-        return run_list(&dir, &appearance);
+    match std::env::var("WD40_CAPTURE_WINDOW").as_deref() {
+        Ok("list") => return run_list(&dir, &appearance),
+        Ok("group") => return crate::capture_group::run(&dir, &appearance),
+        _ => {}
     }
     run_on_main(open);
     std::thread::sleep(Duration::from_millis(600));
@@ -95,7 +97,8 @@ const CROWD: [(ArtifactKind, u64, u64); 6] = [
 fn run_list(dir: &str, appearance: &str) {
     let shoot = |name: &str| {
         std::thread::sleep(Duration::from_millis(500));
-        let path = format!("{dir}/list-{name}-{appearance}.png");
+        let crowd = std::env::var("WD40_CROWD").unwrap_or_else(|_| "old".into());
+        let path = format!("{dir}/list-{crowd}-{name}-{appearance}.png");
         let number = WINDOW.load(Ordering::Relaxed).to_string();
         let taken = std::process::Command::new("screencapture").args(["-x", "-o", "-l", &number, &path]).status();
         eprintln!("wd-40: captured {path} ({taken:?})");
@@ -119,24 +122,30 @@ fn run_list(dir: &str, appearance: &str) {
     run_on_main(|| on_main(|mtm| objc2_app_kit::NSApplication::sharedApplication(mtm).terminate(None)));
 }
 
-fn on_main(body: fn(MainThreadMarker)) {
+pub fn on_main(body: fn(MainThreadMarker)) {
     if let Some(mtm) = MainThreadMarker::new() {
         body(mtm);
     }
 }
 
-fn note_window(view: Option<objc2::rc::Retained<objc2_app_kit::NSView>>) {
+pub fn note_window(view: Option<objc2::rc::Retained<objc2_app_kit::NSView>>) {
     let number = view.and_then(|view| view.window()).map_or(0, |window| window.windowNumber());
     WINDOW.store(number as usize, Ordering::Relaxed);
 }
 
-fn stage_crowd() {
+pub fn stage_crowd() {
     let now = std::time::SystemTime::now();
     with_state(|state| {
         state.targets.clear();
         for (kind, old, recent) in CROWD {
             for n in 0..old + recent {
-                let days = if n < old { 9 + (n * 7) % 300 } else { n % 6 };
+                // WD40_CROWD=clear makes every target recent; =mix, every other group.
+                let young = match std::env::var("WD40_CROWD").as_deref() {
+                    Ok("clear") => true,
+                    Ok("mix") => kind.group() as usize % 2 == 1,
+                    _ => false,
+                };
+                let days = if n < old && !young { 9 + (n * 7) % 300 } else { n % 6 };
                 state.targets.push(TargetDir {
                     path: format!("/Users/dev/code/{}-{n:03}/{}", kind.label().replace(' ', "-"), kind.label()).into(),
                     size_bytes: (3 + (n * 37) % 900) * 1024 * 1024 * if n % 9 == 0 { 8 } else { 1 },

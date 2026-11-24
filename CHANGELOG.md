@@ -15,6 +15,9 @@
 - **The popover list folds by age, per group** (`src/menu_rows.rs`, `src/scan_view.rs`): each group shows up to three of its targets older than "Keep builds newer than", and folds the rest behind a link that says what it holds ("Show 135 more and 11 recent · 97.0 GB"). The row budget used to be six rows shared by every group, which left most groups with none. The count badge is as wide as its figure.
 - **Tick the old batch** (`src/scan_footer.rs`, `src/selection.rs`): one action under the clean button ticks every target past the threshold, in every group, and states the count and size first ("Tick 235 old · 158.5 GB"). It only ticks; nothing is removed until Clean is pressed.
 
+- **A large group scrolls inside itself** (`src/group_scroll.rs`): past seven rows a group's rows sit in a scroll view of their own under the group header, with a fade at each edge that has more. At an end the wheel passes to the list around it. Each group's offset is kept across rebuilds.
+- **Healthy states** (`src/scan_view.rs`, `src/selection.rs`): a group with nothing older than the keep threshold says so in green, and when no group has anything old the list opens with "Nothing to clean" and the button reads "All clear". Recent targets stay listed and tickable.
+
 ### Fixed
 - **`release.sh` stops before building when the Keychain's Sparkle key is not the one `Info.plist` trusts** (`scripts/check-sparkle-key.sh`): 0.7.0 was first published with an EdDSA signature from a different key, and every installed copy reported "The update is improperly signed". The appcast was re-signed with the trusted key; the archives did not change.
 
