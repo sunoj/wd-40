@@ -63,7 +63,7 @@ pub fn maybe_schedule(_mtm: MainThreadMarker) {
         return;
     }
     seed();
-    crate::popover::refresh(_mtm);
+    crate::surface::refresh(_mtm);
     dispatch(run_bench);
 }
 
@@ -108,10 +108,10 @@ fn run_bench() {
     eprintln!("wd40-perf bench start");
 
     let refresh_us = time_repeat("refresh", 8, || {
-        popover::refresh(mtm);
+        crate::surface::refresh(mtm);
     });
     let status_us = time_repeat("refresh_status", 20, || {
-        popover::refresh_status(mtm);
+        crate::status::refresh(mtm);
     });
     let show_first_ms = time_once("show-first", || {
         popover::ensure_open(mtm);
@@ -122,7 +122,7 @@ fn run_bench() {
     });
     popover::close();
     let reopen_old_ms = time_once("reopen-refresh+show", || {
-        popover::refresh(mtm);
+        crate::surface::refresh(mtm);
         popover::ensure_open(mtm);
     });
     popover::close();
@@ -182,7 +182,7 @@ fn run_bench() {
 
     with_state(|state| state.show_all = true);
     let refresh_all_us = time_repeat("refresh-show-all", 4, || {
-        popover::refresh(mtm);
+        crate::surface::refresh(mtm);
     });
     popover::ensure_open(mtm);
     let all_rows = hover_rows(mtm);
@@ -230,7 +230,7 @@ fn time_once(name: &str, body: impl FnOnce()) -> f64 {
 }
 
 fn hover_rows(mtm: MainThreadMarker) -> Vec<Retained<HoverRow>> {
-    let Some(root) = popover::content_view(mtm) else {
+    let Some(root) = crate::surface::content_view(mtm) else {
         return Vec::new();
     };
     let mut rows = Vec::new();

@@ -5,6 +5,7 @@
 // Exports: `Zone`, `Scan`, `Clean`, `install_*`, `clear`, `scan_matches`, `chrome_changed`, the `*_changed` hooks.
 // Deps: crate view modules + state + theme; objc2 AppKit.
 
+use crate::layout::{panel_w, with_width};
 use crate::checkbox::CheckBox;
 use crate::menu_rows::Membership;
 use crate::plate::PlateView;
@@ -24,39 +25,40 @@ thread_local! {
     static CLEAN: RefCell<Option<Clean>> = const { RefCell::new(None) };
 }
 
-/// A slice of the popover that is cheap to draw whole — a dozen views, against
+/// A slice of a screen that is cheap to draw whole — a dozen views, against
 /// several hundred for the screen. Its frame is its own region, so the drawing
-/// code inside it keeps the coordinates it already used.
+/// code inside it keeps the coordinates it already used, and it remembers the
+/// pane width it was built for so a repaint lays out exactly as the build did.
 pub struct Zone {
     view: Retained<NSView>,
     top: f64,
+    width: f64,
 }
 
 impl Zone {
-    pub fn new(parent: &NSView, y: f64, height: f64, mtm: MainThreadMarker) -> Self {
-        let width = crate::widgets::POPOVER_WIDTH;
+    /// A zone `height` tall at the current pane width, with its corner at (x, y).
+    pub fn new(parent: &NSView, x: f64, y: f64, height: f64, mtm: MainThreadMarker) -> Self {
+        let width = panel_w();
         let view = NSView::initWithFrame(
             NSView::alloc(mtm),
-            NSRect::new(NSPoint::new(0.0, y), NSSize::new(width, height)),
+            NSRect::new(NSPoint::new(x, y), NSSize::new(width, height)),
         );
         parent.addSubview(&view);
-        Self { view, top: height }
+        Self { view, top: height, width }
     }
 
-    /// The zone's own top edge, which is what its drawing function counts down from.
-    pub fn top(&self) -> f64 {
-        self.top
+    /// Draw into the zone for the first time. `draw` is handed the zone's view
+    /// and its own top edge, which is what drawing code counts down from.
+    pub fn paint(&self, draw: impl FnOnce(&NSView, f64)) {
+        with_width(self.width, || draw(&self.view, self.top));
     }
 
-    pub fn view(&self) -> &NSView {
-        &self.view
-    }
-
-    /// Empty it ready to be drawn again.
-    pub fn clear(&self) {
+    /// Empty it and draw it again.
+    pub fn repaint(&self, draw: impl FnOnce(&NSView, f64)) {
         for view in self.view.subviews().to_vec() {
             view.removeFromSuperview();
         }
+        self.paint(draw);
     }
 }
 
@@ -85,6 +87,8 @@ pub struct Scan {
     pub rows: Vec<Row>,
     pub groups: Vec<Group>,
     pub membership: Membership,
+    /// Width of the pane the rows were laid out in.
+    pub list_w: f64,
 }
 
 pub struct Clean {
@@ -96,8 +100,6 @@ pub struct Clean {
     pub caption: Retained<NSTextField>,
     pub path: Retained<NSTextField>,
     pub plate: Retained<PlateView>,
-    /// Region of the plate the crust may cover, fixed for the run.
-    pub crust: NSRect,
 }
 
 pub fn install_scan(scan: Scan) {
@@ -129,7 +131,7 @@ pub fn sizes_arrived(arrived: &[usize], mtm: MainThreadMarker) -> bool {
             let held = cell.borrow();
             let Some(scan) = held.as_ref() else { return false };
             let max_size = largest(state);
-            for row in &scan.rows {
+            with_width(scan.list_w, || for row in &scan.rows {
                 let Some(bytes) = state.measured.contains(&row.index).then(|| {
                     state.targets.get(row.index).map_or(0, |t| t.size_bytes)
                 }) else {
@@ -142,7 +144,7 @@ pub fn sizes_arrived(arrived: &[usize], mtm: MainThreadMarker) -> bool {
                 // Every wash is drawn against the largest row, so one arrival
                 // can rescale the rest; they glide rather than snap.
                 crate::motion::glide(&row.wash, crate::scan_rows::wash_frame(bytes, max_size));
-            }
+            });
             for group in &scan.groups {
                 crate::scan_rows::show_group_size(
                     &group.size,
@@ -189,8 +191,7 @@ pub fn selection_changed(mtm: MainThreadMarker) -> bool {
                 );
                 group.check.set(selection, &scan.theme);
             }
-            scan.footer.clear();
-            crate::scan_view::draw_footer(scan.footer.view(), state, &scan.theme, target, mtm);
+            scan.footer.repaint(|view, _| crate::scan_view::draw_footer(view, state, &scan.theme, target, mtm));
             true
         })
     })
@@ -219,37 +220,30 @@ pub fn chrome_changed(mtm: MainThreadMarker) -> bool {
             let held = cell.borrow();
             let Some(scan) = held.as_ref() else { return false };
             redraw_scan_header(scan, state, mtm);
-            for row in &scan.rows {
+            with_width(scan.list_w, || for row in &scan.rows {
                 if let Some(target) = state.targets.get(row.index) {
                     crate::scan_rows::show_age(&row.age, &row.badge, target, state.config.max_age_days);
                 }
-            }
+            });
             true
         })
     })
 }
 
 /// One tick of a clean: the strip, the header, the path and the plate's tiles.
+/// The plate takes the new state in place; only tiles that changed are touched.
 pub fn progress_changed(mtm: MainThreadMarker) -> bool {
     patch(UiScreen::Cleaning, |state, target| {
         CLEAN.with(|cell| {
             let held = cell.borrow();
             let Some(live) = held.as_ref() else { return false };
             let Some(progress) = state.cleaning.clone() else { return false };
-            live.header.clear();
-            live.strip.clear();
-            live.footer.clear();
-            crate::clean_view::draw_disk_header(
-                live.header.view(), live.header.top(), state, &progress, &live.theme, mtm,
-            );
-            crate::clean_view::draw_strip(
-                live.strip.view(), live.strip.top(), &progress, &live.theme, mtm,
-            );
-            crate::clean_view::draw_footer(
-                live.footer.view(), &progress, &live.theme, target, mtm,
-            );
+            let theme = &live.theme;
+            live.header.repaint(|view, top| crate::clean_view::draw_disk_header(view, top, state, &progress, theme, mtm));
+            live.strip.repaint(|view, top| crate::clean_view::draw_strip(view, top, &progress, theme, mtm));
+            live.footer.repaint(|view, _| crate::clean_view::draw_footer(view, &progress, theme, target, mtm));
             crate::clean_view::show_path(&live.caption, &live.path, &progress);
-            live.plate.update(&progress, live.crust);
+            live.plate.update(&progress);
             true
         })
     })
@@ -269,20 +263,13 @@ fn largest(state: &AppState) -> u64 {
 }
 
 fn redraw_scan_header(scan: &Scan, state: &AppState, mtm: MainThreadMarker) {
-    scan.header.clear();
-    crate::header::draw_scan_header(
-        scan.header.view(),
-        scan.header.top(),
-        &crate::scan_view::header_model(state),
-        &scan.theme,
-        mtm,
-    );
+    let model = crate::scan_view::header_model(state);
+    scan.header.repaint(|view, top| crate::header::draw_scan_header(view, top, &model, &scan.theme, mtm));
 }
 
 fn redraw_scan_frame(scan: &Scan, state: &AppState, target: &AnyObject, mtm: MainThreadMarker) {
     redraw_scan_header(scan, state, mtm);
-    scan.footer.clear();
-    crate::scan_view::draw_footer(scan.footer.view(), state, &scan.theme, target, mtm);
+    scan.footer.repaint(|view, _| crate::scan_view::draw_footer(view, state, &scan.theme, target, mtm));
 }
 
 /// Run `body` only while `screen` is the one on show, with the state and the

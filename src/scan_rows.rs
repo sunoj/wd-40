@@ -5,6 +5,7 @@
 // `show_group_size`, `show_age`.
 // Deps: crate::{checkbox, header, hover_row, live, names, reveal, widgets}.
 
+use crate::layout::{content_w, panel_w};
 use crate::checkbox::checkbox;
 use crate::header::scan_size;
 use crate::hover_row::{hover_row, HoverRow};
@@ -13,7 +14,7 @@ use crate::names::{age_short, display_path};
 use crate::reveal::{reveal_button, SIDE as REVEAL_SIDE};
 use crate::selection::{is_recent, GroupSelection};
 use crate::theme::Theme;
-use crate::widgets::{self, label, label_right, label_tracked, PAD_X, POPOVER_WIDTH};
+use crate::widgets::{self, label, label_right, label_tracked, PAD_X};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{sel, MainThreadOnly};
@@ -28,15 +29,23 @@ const UNKNOWN: &str = "\u{2026}";
 /// Marks a total that is still being added to.
 const FLOOR: &str = "\u{2265} ";
 /// The reveal control sits at the row's right edge; the size reads up to it.
-const REVEAL_X: f64 = POPOVER_WIDTH - PAD_X - REVEAL_SIDE;
-const SIZE_X: f64 = PAD_X + 250.0;
-const SIZE_W: f64 = REVEAL_X - 6.0 - SIZE_X;
+fn reveal_x() -> f64 {
+    panel_w() - PAD_X - REVEAL_SIDE
+}
+const SIZE_W: f64 = 92.0 - REVEAL_SIDE;
+fn size_x() -> f64 {
+    reveal_x() - 6.0 - SIZE_W
+}
+/// The RECENT badge sits just left of the size, wherever the pane puts that.
+fn badge_x() -> f64 {
+    size_x() - 68.0
+}
 /// The second line, which the pointer turns into the row's path. It stops short
 /// of the RECENT badge where there is one, and of the size where there is not.
 const DETAIL_X: f64 = PAD_X + 26.0;
-const NAME_W: f64 = 220.0;
-const DETAIL_W_BADGE: f64 = 150.0;
-const DETAIL_W: f64 = SIZE_X - DETAIL_X - 6.0;
+fn name_w() -> f64 {
+    size_x() - DETAIL_X - 4.0
+}
 
 pub struct GroupModel {
     pub group: ArtifactGroup,
@@ -82,13 +91,14 @@ pub fn show_age(field: &NSTextField, badge: &NSView, target: &TargetDir, max_age
 }
 
 fn detail_width(recent: bool) -> f64 {
-    if recent { DETAIL_W_BADGE } else { DETAIL_W }
+    let stop = if recent { badge_x() } else { size_x() };
+    stop - DETAIL_X - 6.0
 }
 
 /// How wide the size wash is for `bytes` against the largest row on screen.
 pub fn wash_frame(bytes: u64, max_size: u64) -> NSRect {
     let fraction = bytes as f64 / max_size.max(1) as f64;
-    let width = (POPOVER_WIDTH * fraction.clamp(0.0, 1.0)).max(0.5);
+    let width = (panel_w() * fraction.clamp(0.0, 1.0)).max(0.5);
     NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(width, ROW_H))
 }
 
@@ -114,7 +124,7 @@ pub fn draw_group_header(
     label_tracked(parent, title(model.group), PAD_X + 46.0, y + 4.0, 120.0, 17.0, 11.5, false, theme.ink_3, true, 0.69, mtm);
     widgets::add_fill(parent, PAD_X + 166.0, y + 5.0, 28.0, 17.0, theme.surface_2, 1.0, 4.0, mtm);
     label(parent, &model.count.to_string(), PAD_X + 171.0, y + 6.0, 18.0, 15.0, 10.5, false, theme.ink_3, true, mtm);
-    let size = label_right(parent, "", PAD_X + 203.0, y + 4.0, widgets::CONTENT_WIDTH - 203.0, 17.0, 12.0, theme.ink_2, true, mtm);
+    let size = label_right(parent, "", PAD_X + 203.0, y + 4.0, content_w() - 203.0, 17.0, 12.0, theme.ink_2, true, mtm);
     show_group_size(&size, model.size, model.settled);
     (y, Group { group: model.group, size, check })
 }
@@ -146,7 +156,7 @@ pub fn draw_row(
     // banded every row into three tones.
     let wash = draw_wash(&row, model, theme, mtm);
     let check = checkbox(&row, GroupSelection::from(model.on), PAD_X, 13.0, sel!(handleToggleItem:), target, tag, theme, mtm);
-    let name = label(&row, model.name, DETAIL_X, 18.0, NAME_W, 16.0, 13.5, false, theme.ink, false, mtm);
+    let name = label(&row, model.name, DETAIL_X, 18.0, name_w(), 16.0, 13.5, false, theme.ink, false, mtm);
     // A device or project name can outrun the column; ending it in an ellipsis
     // says so, where a hard clip reads as a name that happens to look odd.
     name.setLineBreakMode(NSLineBreakMode::ByTruncatingTail);
@@ -154,12 +164,12 @@ pub fn draw_row(
     let age = draw_detail(&row, model, recent, theme, mtm);
     let badge = draw_recent_badge(&row, theme, mtm);
     badge.setHidden(!recent);
-    let size = label_right(&row, "", SIZE_X, 12.0, SIZE_W, 16.0, 13.0, theme.ink, true, mtm);
+    let size = label_right(&row, "", size_x(), 12.0, SIZE_W, 16.0, 13.0, theme.ink, true, mtm);
     show_size(&size, model.measured.then_some(model.target.size_bytes));
     // Its own action, so `HoverRow::hitTest` leaves the click with it: opening
     // Finder must not also tick the row it sits in.
     reveal_button(
-        &row, REVEAL_X, (ROW_H - REVEAL_SIDE) / 2.0, sel!(handleRevealItem:), target,
+        &row, reveal_x(), (ROW_H - REVEAL_SIDE) / 2.0, sel!(handleRevealItem:), target,
         crate::scan_view::TAG_REVEAL_BASE + model.index as isize, theme.ink_3, mtm,
     );
     (y, Row { index: model.index, size, check, wash, age, badge })
@@ -175,7 +185,7 @@ fn draw_detail(
     theme: &Theme,
     mtm: MainThreadMarker,
 ) -> Retained<NSTextField> {
-    let width = if recent { DETAIL_W_BADGE } else { DETAIL_W };
+    let width = detail_width(recent);
     let rest = meta(model.target);
     let path = display_path(&model.target.path);
     let field = label(row, &rest, DETAIL_X, 4.0, width, 14.0, 11.0, false, theme.ink_3, true, mtm);
@@ -210,7 +220,7 @@ fn draw_recent_badge(row: &NSView, theme: &Theme, mtm: MainThreadMarker) -> Reta
     // One host so a reopen can hide the fill and the word together.
     let host = NSView::initWithFrame(
         NSView::alloc(mtm),
-        NSRect::new(NSPoint::new(PAD_X + 182.0, 3.0), NSSize::new(58.0, 17.0)),
+        NSRect::new(NSPoint::new(badge_x(), 3.0), NSSize::new(58.0, 17.0)),
     );
     let badge = widgets::add_fill(&host, 0.0, 0.0, 50.0, 17.0, theme.surface, 1.0, 3.0, mtm);
     badge.setBorderWidth(1.0);
@@ -252,8 +262,9 @@ mod tests {
 
     #[test]
     fn aging_out_of_recent_widens_the_detail_to_the_badge_slot() {
-        assert!(super::DETAIL_W > super::DETAIL_W_BADGE);
-        assert_eq!(super::detail_width(true), super::DETAIL_W_BADGE);
-        assert_eq!(super::detail_width(false), super::DETAIL_W);
+        assert_eq!(super::detail_width(true), 150.0);
+        assert_eq!(super::detail_width(false), 218.0);
+        // A wider pane gives the room to the name and the detail, not the size.
+        crate::layout::with_width(600.0, || assert_eq!(super::detail_width(false), 438.0));
     }
 }

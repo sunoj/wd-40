@@ -13,11 +13,10 @@ mod controls;
 mod crust;
 mod disk_gauge;
 mod done_view;
-mod drift;
-mod grip;
 mod header;
 mod hover_row;
 mod icon;
+mod layout;
 mod legend;
 mod live;
 mod medal;
@@ -40,10 +39,13 @@ mod settings_roots;
 mod settings_row;
 mod settings_view;
 mod settings_chrome;
-mod spray;
+#[cfg(debug_assertions)]
+mod smoke;
 mod startup;
 mod state;
+mod status;
 mod style;
+mod surface;
 mod tasks;
 mod tasks_clean;
 mod theme;
@@ -51,6 +53,7 @@ mod trace;
 mod treemap;
 mod updater;
 mod widgets;
+mod window;
 
 use state::with_state_ret;
 use objc2::rc::Retained;
@@ -76,6 +79,11 @@ define_class!(
             popover::toggle(self.mtm());
         }
 
+        #[unsafe(method(openWindow:))]
+        fn open_window(&self, _sender: &AnyObject) {
+            window::open(self.mtm());
+        }
+
         #[unsafe(method(handleToggleItem:))]
         fn handle_toggle_item(&self, sender: &NSButton) {
             actions::toggle_item(sender.tag(), self.mtm());
@@ -93,7 +101,7 @@ define_class!(
             }).unwrap_or((false, true));
             tasks::reclaim_for_selection_intent(intent.0, intent.1);
             if !live::selection_changed(self.mtm()) {
-                popover::refresh(self.mtm());
+                surface::refresh(self.mtm());
             }
         }
 

@@ -3,6 +3,7 @@
 // Exports: `build`, disclosure state/actions, choice tag decoders, and row tags.
 // Deps: crate::{controls, header, scrolling, settings_row, state, theme, widgets}.
 
+use crate::layout::{content_w, panel_w};
 use crate::controls::days_slider;
 use crate::header::scan_size;
 use crate::settings_chrome::{draw_brand, draw_footer, BRAND_H, FOOTER_H};
@@ -13,7 +14,7 @@ use crate::settings_row::{
 use crate::state::AppState;
 use crate::theme::Theme;
 use crate::widgets::{
-    self, label, label_right, CONTENT_WIDTH, PAD_X, POPOVER_WIDTH,
+    self, label, label_right, PAD_X,
 };
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
@@ -50,16 +51,16 @@ pub fn build(
     target: &AnyObject,
     mtm: MainThreadMarker,
 ) -> (Retained<NSView>, f64) {
-    let sheet = widgets::root_view(SHEET_H, theme.surface, mtm);
+    let sheet = widgets::root_view(panel_w(), SHEET_H, theme, mtm);
     let used = SHEET_H - draw_body(&sheet, SHEET_H, state, theme, target, mtm);
 
     let body_limit = MAX_HEIGHT - BRAND_H - FOOTER_H + disclosure_height();
     let body_h = used.min(body_limit);
     let height = BRAND_H + body_h + FOOTER_H;
-    let root = widgets::root_view(height, theme.surface, mtm);
+    let root = widgets::root_view(panel_w(), height, theme, mtm);
     draw_brand(&root, height, theme, mtm);
     let document =
-        crate::scrolling::scroll_document_view(&root, 0.0, FOOTER_H, POPOVER_WIDTH, body_h, used, mtm);
+        crate::scrolling::scroll_document_view(&root, 0.0, FOOTER_H, panel_w(), body_h, used, mtm);
     // The sheet is taller than what it drew, so hang it from the document's top
     // edge and let the empty tail fall below the scroller.
     sheet.setFrameOrigin(NSPoint::new(0.0, document.frame().size.height - SHEET_H));
@@ -195,10 +196,10 @@ fn draw_safety(
     let days = state.config.max_age_days;
     label(parent, "Keep builds newer than", PAD_X, y - 20.0, 220.0, 16.0, 13.5, false, theme.ink, false, mtm);
     let age = if days == 1 { "1 day".to_string() } else { format!("{days} days") };
-    label_right(parent, &age, PAD_X + 200.0, y - 20.0, CONTENT_WIDTH - 200.0, 16.0, 12.5, theme.ink, true, mtm);
-    days_slider(parent, days, PAD_X, y - 48.0, CONTENT_WIDTH, sel!(settingsSetMaxAge:), target, 0, mtm);
+    label_right(parent, &age, PAD_X + 200.0, y - 20.0, content_w() - 200.0, 16.0, 12.5, theme.ink, true, mtm);
+    days_slider(parent, days, PAD_X, y - 48.0, content_w(), sel!(settingsSetMaxAge:), target, 0, mtm);
     label(parent, "0d", PAD_X, y - 66.0, 40.0, 14.0, 10.5, false, theme.ink_4, true, mtm);
-    label_right(parent, "30d", PAD_X + CONTENT_WIDTH - 40.0, y - 66.0, 40.0, 14.0, 10.5, theme.ink_4, true, mtm);
+    label_right(parent, "30d", PAD_X + content_w() - 40.0, y - 66.0, 40.0, 14.0, 10.5, theme.ink_4, true, mtm);
     y - 78.0
 }
 

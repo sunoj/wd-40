@@ -2,7 +2,6 @@
 // Exports: free functions that mutate AppState / spawn work.
 // Deps: crate::{autostart, popover, settings_view, state, tasks}, wd40::config.
 
-use crate::popover;
 use crate::settings_view;
 use crate::state::{with_state, with_state_ret, UiScreen};
 use crate::tasks;
@@ -21,7 +20,7 @@ pub fn toggle_item(tag: isize, mtm: MainThreadMarker) {
     }).unwrap_or((false, true));
     tasks::reclaim_for_selection_intent(intent.0, intent.1);
     if !crate::live::selection_changed(mtm) {
-        popover::refresh(mtm);
+        crate::surface::refresh(mtm);
     }
 }
 
@@ -30,13 +29,13 @@ pub fn done_ack(mtm: MainThreadMarker) {
         state.screen = UiScreen::Scan;
         state.done = None;
     });
-    popover::refresh(mtm);
+    crate::surface::refresh(mtm);
     tasks::start_scan();
 }
 
 pub fn show_more(mtm: MainThreadMarker) {
     with_state(|state| state.show_all = true);
-    popover::refresh(mtm);
+    crate::surface::refresh(mtm);
 }
 
 /// Both settings screens scroll, and they do not share a place in a list, so a
@@ -45,7 +44,7 @@ pub fn open_settings(mtm: MainThreadMarker) {
     crate::scrolling::reset_scroll();
     settings_view::collapse_disclosure();
     with_state(|state| state.screen = UiScreen::Settings);
-    popover::refresh(mtm);
+    crate::surface::refresh(mtm);
 }
 
 /// Leave settings for the list. Deliberately no rescan: the controls that need
@@ -55,7 +54,7 @@ pub fn close_settings(mtm: MainThreadMarker) {
     crate::scrolling::reset_scroll();
     settings_view::collapse_disclosure();
     with_state(|state| state.screen = UiScreen::Scan);
-    popover::refresh(mtm);
+    crate::surface::refresh(mtm);
 }
 
 pub fn interval(sender: &NSButton, mtm: MainThreadMarker) {
@@ -73,7 +72,7 @@ pub fn interval(sender: &NSButton, mtm: MainThreadMarker) {
     } else {
         settings_view::toggle_disclosure(settings_view::SettingsDisclosure::AutoClean);
     }
-    popover::refresh(mtm);
+    crate::surface::refresh(mtm);
 }
 
 pub fn set_max_age(days: u64, mtm: MainThreadMarker) {
@@ -82,13 +81,13 @@ pub fn set_max_age(days: u64, mtm: MainThreadMarker) {
         state.config.save();
         state.reset_selection();
     });
-    popover::refresh(mtm);
+    crate::surface::refresh(mtm);
 }
 
 pub fn depth(sender: &NSButton, mtm: MainThreadMarker) {
     let Some(depth) = settings_view::depth_for_tag(sender.tag()) else {
         settings_view::toggle_disclosure(settings_view::SettingsDisclosure::ScanDepth);
-        popover::refresh(mtm);
+        crate::surface::refresh(mtm);
         return;
     };
     with_state(|state| {
@@ -96,7 +95,7 @@ pub fn depth(sender: &NSButton, mtm: MainThreadMarker) {
         state.config.save();
     });
     settings_view::collapse_disclosure();
-    popover::refresh(mtm);
+    crate::surface::refresh(mtm);
     tasks::start_scan();
 }
 
@@ -111,7 +110,7 @@ pub fn toggle_scan_group(sender: &NSButton, mtm: MainThreadMarker) {
         state.config.set_scans(group, !on);
         state.config.save();
     });
-    popover::refresh(mtm);
+    crate::surface::refresh(mtm);
     tasks::start_scan();
 }
 
@@ -120,7 +119,7 @@ pub fn toggle_menu_bar_size(mtm: MainThreadMarker) {
         state.config.menu_bar_size = !state.config.menu_bar_size;
         state.config.save();
     });
-    popover::refresh(mtm);
+    crate::surface::refresh(mtm);
 }
 
 /// Add a folder to the scan roots. The panel is a window of its own, so the
@@ -133,7 +132,7 @@ pub fn add_scan_root(mtm: MainThreadMarker) {
         state.config.scan_dirs.push(path);
         state.config.save();
     });
-    popover::refresh(mtm);
+    crate::surface::refresh(mtm);
     tasks::start_scan();
 }
 
@@ -146,7 +145,7 @@ pub fn remove_scan_root(sender: &NSButton, mtm: MainThreadMarker) {
         state.config.scan_dirs.remove(index);
         state.config.save();
     });
-    popover::refresh(mtm);
+    crate::surface::refresh(mtm);
     tasks::start_scan();
 }
 
@@ -155,7 +154,7 @@ pub fn toggle_login(mtm: MainThreadMarker) {
     if let Err(err) = crate::autostart::set_enabled(enable) {
         show_alert(mtm, "Launch at Login", &err);
     }
-    popover::refresh(mtm);
+    crate::surface::refresh(mtm);
 }
 
 pub fn toggle_auto_update(mtm: MainThreadMarker) {
@@ -164,7 +163,7 @@ pub fn toggle_auto_update(mtm: MainThreadMarker) {
             updater.set_automatic_checks(!updater.automatic_checks());
         }
     });
-    popover::refresh(mtm);
+    crate::surface::refresh(mtm);
 }
 
 pub fn check_updates() {

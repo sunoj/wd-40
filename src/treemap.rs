@@ -1,7 +1,7 @@
 // Squarified treemap of the targets a clean is working through: one tile per
 // target, tile area proportional to its bytes, laid out inside the crust region
 // the caller sizes against the volume.
-// Exports: `Tile`, tile state constants, `tiles`, `contains`, `rust_tone`.
+// Exports: `Tile`, tile state constants, `tiles`, `rust_tone`.
 // Deps: crate::state, objc2_foundation geometry, wd40::disk.
 
 use crate::state::{CleanItemStatus, CleanProgress};
@@ -89,13 +89,6 @@ fn tile_state(status: CleanItemStatus) -> u8 {
         CleanItemStatus::Partial => PART_GONE,
         CleanItemStatus::Failed => BLOCKED,
     }
-}
-
-pub fn contains(rect: NSRect, point: NSPoint) -> bool {
-    point.x >= rect.origin.x
-        && point.x < rect.origin.x + rect.size.width
-        && point.y >= rect.origin.y
-        && point.y < rect.origin.y + rect.size.height
 }
 
 /// Squarify (Bruls et al.): fill the short side with a row of tiles for as long

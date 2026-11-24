@@ -1,7 +1,7 @@
 // How a clean is going: how long this run has been working, and the only ETA
 // the app is entitled to quote. Kept apart from the cleaning screen because it
 // is arithmetic over what has really been removed, not layout.
-// Exports: `elapsed`, `eta_label`. Deps: crate::{spray, state}, wd40::disk.
+// Exports: `elapsed`, `eta_label`. Deps: crate::state, wd40::disk.
 
 use crate::state::{CleanItemStatus, CleanProgress};
 use std::cell::Cell;
@@ -15,7 +15,7 @@ thread_local! {
 
 /// Seconds this run has been measurably working. A run is new when nothing has
 /// come off yet, when the finished count drops, or when the queue length
-/// changes; that is also when a rub is wiped.
+/// changes.
 pub fn elapsed(p: &CleanProgress) -> f64 {
     let now = Instant::now();
     CLOCK.with(|cell| {
@@ -24,9 +24,6 @@ pub fn elapsed(p: &CleanProgress) -> f64 {
                 Some((_, done, total)) => p.done_count < done || p.total_count != total,
                 None => true,
             };
-        if fresh {
-            crate::spray::clear_wiped();
-        }
         let start = if fresh { now } else { cell.get().map_or(now, |value| value.0) };
         cell.set(Some((start, p.done_count, p.total_count)));
         now.duration_since(start).as_secs_f64()

@@ -4,6 +4,7 @@
 // Exports: `HoverRow`, `hover_row`, `fit_detail`.
 // Deps: objc2 AppKit tracking APIs; crate::{actions, theme, widgets}.
 
+use crate::layout::{panel_w};
 use crate::theme::Theme;
 use crate::widgets::retrack;
 use objc2::rc::Retained;
@@ -175,7 +176,7 @@ pub fn hover_row(
     tag: isize,
     mtm: MainThreadMarker,
 ) -> Retained<HoverRow> {
-    let width = crate::widgets::POPOVER_WIDTH;
+    let width = panel_w();
     let frame = NSRect::new(NSPoint::new(0.0, y), NSSize::new(width, height));
     let row = mtm.alloc().set_ivars(HoverRowIvars {
         tint: make_tint(width, height, color, mtm),

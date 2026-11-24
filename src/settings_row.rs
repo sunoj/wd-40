@@ -5,10 +5,11 @@
 // and artifact groups.
 // Deps: objc2 AppKit tracking APIs; crate::{controls, theme, widgets}.
 
+use crate::layout::{content_w, panel_w};
 use crate::controls::pill;
 use crate::theme::Theme;
 use crate::widgets::{
-    self, add_fill, label, label_right, label_tracked, retrack, CONTENT_WIDTH, PAD_X, POPOVER_WIDTH,
+    self, add_fill, label, label_right, label_tracked, retrack, PAD_X,
 };
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Sel};
@@ -23,11 +24,17 @@ const SECTION_H: f64 = 32.0;
 const DIVIDER_H: f64 = 9.0;
 
 const SWITCH_W: f64 = 38.0;
-const SWITCH_X: f64 = POPOVER_WIDTH - PAD_X - SWITCH_W;
+fn switch_x() -> f64 {
+    panel_w() - PAD_X - SWITCH_W
+}
 const CHEVRON: f64 = 13.0;
-const CHEVRON_X: f64 = POPOVER_WIDTH - PAD_X - CHEVRON;
+fn chevron_x() -> f64 {
+    panel_w() - PAD_X - CHEVRON
+}
 /// Right edge of a value, clear of the chevron beside it.
-const VALUE_RIGHT: f64 = CHEVRON_X - 5.0;
+fn value_right() -> f64 {
+    chevron_x() - 5.0
+}
 const CHOICE_H: f64 = 30.0;
 
 /// What every settings row needs: what it says, and what a click on it sends.
@@ -87,7 +94,7 @@ define_class!(
 /// A row of `h` points ending at `y_top`, tinted while the pointer is inside it.
 /// The click target is added by `close_row` once the content is in place.
 fn open_row(parent: &NSView, y_top: f64, h: f64, theme: &Theme, mtm: MainThreadMarker) -> Retained<SettingsRow> {
-    let frame = NSRect::new(NSPoint::new(0.0, y_top - h), NSSize::new(POPOVER_WIDTH, h));
+    let frame = NSRect::new(NSPoint::new(0.0, y_top - h), NSSize::new(panel_w(), h));
     let row = mtm.alloc().set_ivars(tint(h, theme, mtm));
     let row: Retained<SettingsRow> = unsafe { msg_send![super(row), initWithFrame: frame] };
     row.addSubview(row.ivars());
@@ -104,7 +111,7 @@ fn close_row(row: &SettingsRow, h: f64, spec_action: Sel, tag: isize, target: &A
     };
     button.setBordered(false);
     button.setButtonType(NSButtonType::MomentaryChange);
-    button.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(POPOVER_WIDTH, h)));
+    button.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(panel_w(), h)));
     button.setTag(tag);
     row.addSubview(&button);
 }
@@ -112,9 +119,9 @@ fn close_row(row: &SettingsRow, h: f64, spec_action: Sel, tag: isize, target: &A
 fn tint(h: f64, theme: &Theme, mtm: MainThreadMarker) -> Retained<NSBox> {
     let holder = NSView::initWithFrame(
         NSView::alloc(mtm),
-        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(POPOVER_WIDTH, h)),
+        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(panel_w(), h)),
     );
-    let tint = add_fill(&holder, 0.0, 0.0, POPOVER_WIDTH, h, theme.surface_2, 1.0, 0.0, mtm);
+    let tint = add_fill(&holder, 0.0, 0.0, panel_w(), h, theme.surface_2, 1.0, 0.0, mtm);
     tint.removeFromSuperview();
     tint.setHidden(true);
     tint
@@ -141,8 +148,8 @@ pub fn switch_row(
 ) -> f64 {
     let h = spec.hint.map_or(ROW_H, |_| HINT_ROW_H);
     let row = open_row(parent, y_top, h, theme, mtm);
-    draw_title(&row, spec, SWITCH_X - PAD_X - 8.0, theme, mtm);
-    pill(&row, on, SWITCH_X, (h - 22.0) / 2.0, theme, mtm);
+    draw_title(&row, spec, switch_x() - PAD_X - 8.0, theme, mtm);
+    pill(&row, on, switch_x(), (h - 22.0) / 2.0, theme, mtm);
     close_row(&row, h, spec.action, 0, target, mtm);
     y_top - h
 }
@@ -163,9 +170,9 @@ pub fn value_row(
     draw_title(&row, spec, 180.0, theme, mtm);
     if let Some(value) = value {
         let x = PAD_X + 184.0;
-        label_right(&row, value, x, (h - 16.0) / 2.0, VALUE_RIGHT - x, 16.0, 12.5, theme.ink_2, true, mtm);
+        label_right(&row, value, x, (h - 16.0) / 2.0, value_right() - x, 16.0, 12.5, theme.ink_2, true, mtm);
     }
-    widgets::symbol_view(&row, "chevron.right", CHEVRON_X, (h - CHEVRON) / 2.0, CHEVRON, theme.ink_4, mtm);
+    widgets::symbol_view(&row, "chevron.right", chevron_x(), (h - CHEVRON) / 2.0, CHEVRON, theme.ink_4, mtm);
     close_row(&row, h, spec.action, 0, target, mtm);
     y_top - h
 }
@@ -187,9 +194,9 @@ pub fn disclosure_row(
     let row = open_row(parent, y_top, h, theme, mtm);
     draw_title(&row, spec, 180.0, theme, mtm);
     let x = PAD_X + 184.0;
-    label_right(&row, value, x, (h - 16.0) / 2.0, VALUE_RIGHT - x, 16.0, 12.5, theme.ink_2, true, mtm);
+    label_right(&row, value, x, (h - 16.0) / 2.0, value_right() - x, 16.0, 12.5, theme.ink_2, true, mtm);
     let chevron = if expanded { "chevron.down" } else { "chevron.right" };
-    widgets::symbol_view(&row, chevron, CHEVRON_X, (h - CHEVRON) / 2.0, CHEVRON, theme.ink_4, mtm);
+    widgets::symbol_view(&row, chevron, chevron_x(), (h - CHEVRON) / 2.0, CHEVRON, theme.ink_4, mtm);
     close_row(&row, h, spec.action, 0, target, mtm);
 
     let mut y = y_top - h;
@@ -235,21 +242,21 @@ pub fn group_row(
     widgets::symbol_view(&row, spec.symbol, PAD_X, (ROW_H - 15.0) / 2.0, 15.0, theme.ink_3, mtm);
     label(&row, spec.title, PAD_X + 26.0, 11.0, 160.0, 16.0, 13.5, false, theme.ink, false, mtm);
     let x = PAD_X + 190.0;
-    label_right(&row, spec.size, x, 11.5, SWITCH_X - 10.0 - x, 15.0, 12.0, theme.ink_3, true, mtm);
-    pill(&row, spec.on, SWITCH_X, (ROW_H - 22.0) / 2.0, theme, mtm);
+    label_right(&row, spec.size, x, 11.5, switch_x() - 10.0 - x, 15.0, 12.0, theme.ink_3, true, mtm);
+    pill(&row, spec.on, switch_x(), (ROW_H - 22.0) / 2.0, theme, mtm);
     close_row(&row, ROW_H, spec.action, spec.tag, target, mtm);
     y_top - ROW_H
 }
 
 pub fn section(parent: &NSView, y_top: f64, title: &str, theme: &Theme, mtm: MainThreadMarker) -> f64 {
     label_tracked(
-        parent, title, PAD_X, y_top - 26.0, CONTENT_WIDTH, 14.0, 11.0, false, theme.ink_3, true,
+        parent, title, PAD_X, y_top - 26.0, content_w(), 14.0, 11.0, false, theme.ink_3, true,
         0.66, mtm,
     );
     y_top - SECTION_H
 }
 
 pub fn divider(parent: &NSView, y_top: f64, theme: &Theme, mtm: MainThreadMarker) -> f64 {
-    widgets::add_line(parent, PAD_X, y_top - 8.0, CONTENT_WIDTH, theme.line, mtm);
+    widgets::add_line(parent, PAD_X, y_top - 8.0, content_w(), theme.line, mtm);
     y_top - DIVIDER_H
 }

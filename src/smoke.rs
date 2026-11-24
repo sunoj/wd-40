@@ -1,0 +1,103 @@
+// Smoke run for the window: open it, clean a throwaway fixture through the real
+// clean path, close it, quit. Debug builds only; activated by WD40_SMOKE_ROOT,
+// which names the only directory the run is allowed to remove anything under.
+// Deps: crate::{mainthread, plate, state, surface, tasks, window}.
+
+use crate::mainthread::run_on_main;
+use crate::state::{with_state_ret, UiScreen};
+use crate::{surface, tasks, window};
+use objc2_foundation::MainThreadMarker;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
+static STARTED: AtomicBool = AtomicBool::new(false);
+
+fn root() -> Option<PathBuf> {
+    std::env::var_os("WD40_SMOKE_ROOT").and_then(|root| PathBuf::from(root).canonicalize().ok())
+}
+
+pub fn maybe_start() {
+    if root().is_none() || STARTED.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    std::thread::spawn(|| {
+        let pause = |ms: u64| std::thread::sleep(Duration::from_millis(ms));
+        pause(300);
+        run_on_main(open);
+        pause(700);
+        run_on_main(clean);
+        // The cleaning screen holds for its minimum time, then hands over.
+        for _ in 0..150 {
+            pause(200);
+            if with_done() {
+                break;
+            }
+        }
+        run_on_main(close);
+        pause(500);
+        run_on_main(quit);
+    });
+}
+
+fn with_done() -> bool {
+    static DONE: AtomicBool = AtomicBool::new(false);
+    run_on_main(|| {
+        let done = with_state_ret(|state| state.screen == UiScreen::Done).unwrap_or(false);
+        DONE.store(done, Ordering::Relaxed);
+    });
+    DONE.load(Ordering::Relaxed)
+}
+
+fn open() {
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    window::open(mtm);
+    eprintln!("smoke: window opened, visible={}", window::is_visible());
+}
+
+/// Tick exactly the targets under the smoke root and start the real clean.
+/// Refuses to start if that would leave anything else ticked.
+fn clean() {
+    let (Some(mtm), Some(root)) = (MainThreadMarker::new(), root()) else { return };
+    let job = with_state_ret(|state| {
+        state.selected = (0..state.targets.len())
+            .filter(|index| state.targets[*index].path.canonicalize().is_ok_and(|path| path.starts_with(&root)))
+            .collect();
+        let paths: Vec<PathBuf> = state.selected.iter().map(|index| state.targets[*index].path.clone()).collect();
+        (paths, state.targets.len())
+    });
+    let Some((paths, found)) = job else { return };
+    let safe = !paths.is_empty()
+        && paths.iter().all(|path| path.canonicalize().is_ok_and(|path| path.starts_with(&root)));
+    eprintln!("smoke: scan found {found} targets, {} under {}", paths.len(), root.display());
+    for path in &paths {
+        eprintln!("smoke:   will remove {}", path.display());
+    }
+    if !safe {
+        eprintln!("smoke: refusing to clean, nothing under the smoke root");
+        return quit();
+    }
+    surface::refresh(mtm);
+    tasks::spawn_clean_selected();
+    eprintln!("smoke: clean started, screen is cleaning={}", on_screen(UiScreen::Cleaning));
+}
+
+fn close() {
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    let freed = with_state_ret(|state| state.done.as_ref().map(|done| done.freed_bytes)).flatten();
+    eprintln!("smoke: done screen={}, summary freed={freed:?}", on_screen(UiScreen::Done));
+    let paints = crate::plate::STEEL_PAINTS.load(Ordering::Relaxed);
+    eprintln!("smoke: plate steel painted {paints} time(s) during the run");
+    window::close(mtm);
+    eprintln!("smoke: window closed, visible={}, any surface open={}", window::is_visible(), surface::is_open());
+}
+
+fn quit() {
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    eprintln!("smoke: quitting cleanly");
+    objc2_app_kit::NSApplication::sharedApplication(mtm).terminate(None);
+}
+
+fn on_screen(screen: UiScreen) -> bool {
+    with_state_ret(|state| state.screen == screen).unwrap_or(false)
+}

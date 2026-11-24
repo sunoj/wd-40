@@ -42,7 +42,7 @@ pub struct PopoverOpening(());
 pub fn start() {
     let cleaning_screen = with_state_ret(|state| state.screen == UiScreen::Cleaning)
         .unwrap_or(false);
-    if !can_start(crate::tasks::is_busy(), cleaning_screen, crate::popover::is_open()) {
+    if !can_start(crate::tasks::is_busy(), cleaning_screen, crate::surface::is_open()) {
         return;
     }
     let Some(config) = with_state_ret(|state| state.config.clone()) else { return };

@@ -1,7 +1,8 @@
 // Getting work onto the main thread: straight away from a worker thread, or
 // later off a timer. Scanning and cleaning both run off it, and every one of
 // their results has to be applied where AppKit lives.
-// Exports: `dispatch_to_main`, the trampolines, `schedule`, `stop_timer`.
+// Exports: `dispatch_to_main`, `run_on_main`, the trampolines, `schedule`,
+// `stop_timer`.
 // Deps: libdispatch FFI, objc2, crate::{MenuHandler, HANDLER}.
 
 use crate::{MenuHandler, HANDLER};
@@ -15,6 +16,18 @@ use std::ffi::c_void;
 pub(crate) fn dispatch_to_main(work: extern "C" fn(*mut c_void)) {
     unsafe {
         dispatch_async_f(std::ptr::addr_of!(_dispatch_main_q), std::ptr::null_mut(), work);
+    }
+}
+
+/// Run a plain function on the main thread, once the current event has been
+/// dealt with. The function pointer itself rides in the context argument.
+pub(crate) fn run_on_main(work: fn()) {
+    extern "C" fn call(context: *mut c_void) {
+        let work: fn() = unsafe { std::mem::transmute(context) };
+        work();
+    }
+    unsafe {
+        dispatch_async_f(std::ptr::addr_of!(_dispatch_main_q), work as *mut c_void, call);
     }
 }
 

@@ -1,15 +1,13 @@
-// Our can, drawn from the app icon at the size the plate can carry: blue glass
-// body under a yellow label band, silver crimps and a tapered shoulder, red
-// head and straw. The icon's glass is flattened against its own panel, so the
-// can reads the same on a light plate as on a dark one. Exports: `draw_nozzle`.
-// Deps: crate::metal, objc2 AppKit. Drawing calls belong in `drawRect:`.
+// Our can, drawn from the app icon: blue glass body under a yellow label band,
+// silver crimps and a tapered shoulder, red head and straw. It is painted once
+// into its own view, so moving it across the plate never repaints it; the same
+// view, larger and stood on its base, is the mark in the window's sidebar.
+// Exports: `can_view`, `Pose`, `SPRAY`, `STANDING`. Deps: objc2 AppKit.
 
-use crate::grip::{hold, Grip, Span};
-use crate::legend::Name;
-use crate::metal::{circle_path, grey};
 use objc2::rc::Retained;
-use objc2_app_kit::{NSBezierPath, NSColor};
-use objc2_foundation::{NSPoint, NSRect};
+use objc2::{define_class, msg_send, DefinedClass, MainThreadOnly};
+use objc2_app_kit::{NSBezierPath, NSColor, NSView};
+use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize};
 
 // The can's own frame, in points: x runs right from the pivot, y runs up from
 // the head — the end that is pointed at the plate. Every figure is the icon's
@@ -35,13 +33,6 @@ const STRAW_Y: (f64, f64) = (6.5, 30.5);
 /// The free end of the straw, out of the head and pointed at the plate.
 const TIP_X: (f64, f64) = (5.5, 8.0);
 const TIP_Y: (f64, f64) = (-9.0, 0.0);
-/// The can proper, head to base: what has to land whole inside the plate. The
-/// straw tip is deliberately not in it — it ends on the point being sprayed,
-/// and that point is allowed to be the very edge of the plate, so nothing could
-/// ever fit there if the tip had to be inside too. The tip is the only part
-/// that may be clipped, and only within its own 9pt of the boundary.
-const SPAN: Span = ((HEAD_X.0, BODY_X.1), (HEAD_Y.0, RIM_BASE_Y.1));
-
 /// Every palette below is the icon's own gradient, composited over the panel it
 /// sits on (#E0DCD5) so it can be drawn as opaque paint. Channels are kept as
 /// 0-255 so they can be checked against the design without decoding a float.
@@ -93,35 +84,86 @@ const SHOULDER: [(f64, [f64; 3]); 4] = [
     (1.0, [136.0, 149.0, 169.0]),
 ];
 
-/// Cone then can. The can hangs off the point it is aimed at, as the mock hangs
-/// it: up and to the right, which also keeps it clear of the arrow cursor.
-pub fn draw_nozzle(point: NSPoint, cone: bool, plate: NSRect, name: Option<&mut Name>) {
-    if cone {
-        for step in 0..12 {
-            grey(1.0, 0.1).setFill();
-            circle_path(point, 26.0 * (1.0 - step as f64 / 12.0)).fill();
+/// How the can is held: where its own origin lands in the view, how far it is
+/// turned, and how large it is drawn.
+#[derive(Clone, Copy)]
+pub struct Pose {
+    origin: (f64, f64),
+    degrees: f64,
+    scale: f64,
+    /// Size of the view that holds a can in this pose.
+    pub size: (f64, f64),
+}
+
+/// Held over the plate, leaning back from the point it sprays: the straw tip
+/// lands on `SPRAY.tip()` in the view's own coordinates.
+pub const SPRAY: Pose = Pose { origin: (4.0, 13.0), degrees: -24.0, scale: 1.0, size: (54.0, 64.0) };
+/// Stood on its base, head up, three times the size.
+pub const STANDING: Pose = Pose { origin: (75.0, 160.5), degrees: 180.0, scale: 3.0, size: (84.0, 190.0) };
+
+impl Pose {
+    /// A point of the can's own drawing, in the view's coordinates.
+    fn map(&self, x: f64, y: f64) -> NSPoint {
+        let (sin, cos) = self.degrees.to_radians().sin_cos();
+        NSPoint::new(
+            self.origin.0 + (x * cos - y * sin) * self.scale,
+            self.origin.1 + (x * sin + y * cos) * self.scale,
+        )
+    }
+
+    /// Where the free end of the straw is: the point the can is aimed at.
+    pub fn tip(&self) -> NSPoint {
+        self.map((TIP_X.0 + TIP_X.1) / 2.0, TIP_Y.0)
+    }
+}
+
+pub struct CanIvars {
+    pose: Pose,
+}
+
+define_class!(
+    #[unsafe(super(NSView))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = CanIvars]
+    #[name = "WD40Can"]
+    pub struct CanView;
+
+    impl CanView {
+        #[unsafe(method(drawRect:))]
+        fn draw_rect(&self, _dirty: NSRect) {
+            draw_can(&self.ivars().pose);
+        }
+
+        /// Decoration: a click on the can belongs to whatever is under it.
+        #[unsafe(method(hitTest:))]
+        fn hit_test(&self, _point: NSPoint) -> *mut NSView {
+            std::ptr::null_mut()
         }
     }
-    let choices = name.as_ref().map(|name| name.choices());
-    let held = hold(point, plate, choices.as_ref().map_or(&[] as &[NSRect], |all| &all[..]), SPAN);
-    if let Some(name) = name {
-        name.take(held.cleared.unwrap_or(0));
-    }
-    let can = Grip::turned(point, held.turn);
-    shoulder(&can);
-    sweep(&can, NECK_Y, NECK_X, NECK_X, &RIM_TOP);
-    sweep(&can, BODY_Y, BODY_X, BODY_X, &BODY);
-    sweep(&can, BAND_Y, BODY_X, BODY_X, &BAND);
-    sweep(&can, RIM_TOP_Y, BODY_X, BODY_X, &RIM_TOP);
-    sweep(&can, RIM_BASE_Y, BODY_X, BASE_CHAMFER, &RIM_BASE);
-    sweep(&can, STRAW_Y, STRAW_X, STRAW_X, &STRAW);
-    sweep(&can, TIP_Y, TIP_X, TIP_X, &STRAW);
-    sweep(&can, HEAD_Y, HEAD_X, HEAD_X, &HEAD);
+);
+
+/// A can in `pose`, with the view's corner at `at`.
+pub fn can_view(pose: Pose, at: NSPoint, mtm: MainThreadMarker) -> Retained<CanView> {
+    let frame = NSRect::new(at, NSSize::new(pose.size.0, pose.size.1));
+    let view = mtm.alloc::<CanView>().set_ivars(CanIvars { pose });
+    unsafe { msg_send![super(view), initWithFrame: frame] }
+}
+
+fn draw_can(can: &Pose) {
+    shoulder(can);
+    sweep(can, NECK_Y, NECK_X, NECK_X, &RIM_TOP);
+    sweep(can, BODY_Y, BODY_X, BODY_X, &BODY);
+    sweep(can, BAND_Y, BODY_X, BODY_X, &BAND);
+    sweep(can, RIM_TOP_Y, BODY_X, BODY_X, &RIM_TOP);
+    sweep(can, RIM_BASE_Y, BODY_X, BASE_CHAMFER, &RIM_BASE);
+    sweep(can, STRAW_Y, STRAW_X, STRAW_X, &STRAW);
+    sweep(can, TIP_Y, TIP_X, TIP_X, &STRAW);
+    sweep(can, HEAD_Y, HEAD_X, HEAD_X, &HEAD);
 }
 
 /// The tapered shoulder between neck and body, in bands along the can because
 /// that is the way its gradient runs.
-fn shoulder(can: &Grip) {
+fn shoulder(can: &Pose) {
     const BANDS: usize = 3;
     let span = |t: f64| {
         (
@@ -140,8 +182,8 @@ fn shoulder(can: &Grip) {
 /// One part of the can: a gradient across it, drawn as vertical strips, with an
 /// x span at each end so the same call covers a straight side, the tapered
 /// shoulder or the chamfered base. Narrow parts take fewer strips.
-fn sweep(can: &Grip, y: (f64, f64), lower: (f64, f64), upper: (f64, f64), stops: Stops) {
-    let strips = ((lower.1 - lower.0) / 2.0).ceil().clamp(2.0, 12.0) as usize;
+fn sweep(can: &Pose, y: (f64, f64), lower: (f64, f64), upper: (f64, f64), stops: Stops) {
+    let strips = ((lower.1 - lower.0) * can.scale / 2.0).ceil().clamp(2.0, 36.0) as usize;
     for strip in 0..strips {
         let (a, b) = (strip as f64 / strips as f64, (strip + 1) as f64 / strips as f64);
         ink(mix(stops, (a + b) / 2.0)).setFill();
@@ -181,8 +223,8 @@ fn ink(tone: [f64; 3]) -> Retained<NSColor> {
     NSColor::colorWithSRGBRed_green_blue_alpha(tone[0] / 255.0, tone[1] / 255.0, tone[2] / 255.0, 1.0)
 }
 
-/// Points in the can's own frame, placed by the grip and filled.
-fn poly(can: &Grip, points: &[(f64, f64)]) {
+/// Points in the can's own frame, placed by the pose and filled.
+fn poly(can: &Pose, points: &[(f64, f64)]) {
     let path = NSBezierPath::new();
     for (index, (x, y)) in points.iter().enumerate() {
         let point = can.map(*x, *y);
@@ -197,65 +239,33 @@ fn poly(can: &Grip, points: &[(f64, f64)]) {
 
 #[cfg(test)]
 mod tests {
-    use super::SPAN;
-    use crate::crust::PLATE_H;
-    use crate::grip::{fits, hold, turns};
-    use crate::legend::label_spots;
-    use crate::widgets::CONTENT_WIDTH;
-    use objc2_foundation::{NSPoint, NSRect, NSSize};
+    use super::{Pose, BODY_X, BODY_Y, HEAD_X, HEAD_Y, RIM_BASE_Y, SPRAY, STANDING, TIP_X, TIP_Y};
 
-    fn plate() -> NSRect {
-        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(CONTENT_WIDTH, PLATE_H))
+    fn inside(pose: &Pose, x: f64, y: f64) -> bool {
+        let at = pose.map(x, y);
+        at.x >= 0.0 && at.x <= pose.size.0 && at.y >= 0.0 && at.y <= pose.size.1
     }
 
-    /// Every point of the plate, on a 4pt grid.
-    fn aims() -> impl Iterator<Item = NSPoint> {
-        (0..=(CONTENT_WIDTH as usize / 4)).flat_map(|x| {
-            (0..=(PLATE_H as usize / 4)).map(move |y| NSPoint::new(x as f64 * 4.0, y as f64 * 4.0))
-        })
-    }
-
-    /// The nozzle has to be able to work a tile anywhere on the plate — the top
-    /// edge above all, which is where the crust hangs — without the can being
-    /// cut off by the boundary everything there is clipped to.
+    /// The can is painted once into a view of the pose's size, so its
+    /// outermost points — straw tip, head, body and base — have to land inside
+    /// that view or it would be cut off.
     #[test]
-    fn there_is_a_grip_that_fits_wherever_the_nozzle_can_be_aimed() {
-        for at in aims() {
-            assert!(turns().any(|turn| fits(at, turn, plate(), None, SPAN)), "nothing fits at {at:?}");
-        }
-    }
-
-    /// The can and the name are both placed from the tile being worked, so they
-    /// are always drawn next to each other. On the same grid: the can has to
-    /// leave the name one of its two places — and where it cannot, that has to
-    /// be a tile hard against the side of the plate, which has no room beside
-    /// it for a name and a can both. There the name keeps its place and is
-    /// drawn over the can, so it still reads.
-    #[test]
-    fn the_can_leaves_the_name_a_place_except_hard_against_the_sides() {
-        let pill = NSSize::new(110.0, 19.0);
-        for at in aims() {
-            // The patch under the nozzle, and the places its name could take.
-            let tile = NSRect::new(NSPoint::new(at.x - 16.0, at.y - 11.0), NSSize::new(32.0, 22.0));
-            let choices = label_spots(plate(), tile, pill).map(|spot| NSRect::new(spot, pill));
-            let held = hold(at, plate(), &choices, SPAN);
-            assert!(fits(at, held.turn, plate(), None, SPAN), "the can is cut off at {at:?}");
-            match held.cleared {
-                Some(choice) => assert!(
-                    fits(at, held.turn, plate(), Some(choices[choice]), SPAN),
-                    "the can covers the name at {at:?}"
-                ),
-                None => assert!(
-                    at.x <= 24.0 || at.x >= CONTENT_WIDTH - 24.0,
-                    "the can covers the name away from the sides, at {at:?}"
-                ),
+    fn each_pose_holds_the_whole_can() {
+        let outline = [
+            (TIP_X.0, TIP_Y.0), (TIP_X.1, TIP_Y.0), (HEAD_X.0, HEAD_Y.0), (HEAD_X.1, HEAD_Y.0),
+            (HEAD_X.0, HEAD_Y.1), (BODY_X.1, BODY_Y.0), (BODY_X.0, RIM_BASE_Y.1), (BODY_X.1, RIM_BASE_Y.1),
+        ];
+        for pose in [SPRAY, STANDING] {
+            for (x, y) in outline {
+                assert!(inside(&pose, x, y), "({x}, {y}) falls outside");
             }
         }
     }
 
-    /// And a can with the room it wants is left exactly where the mock hangs it.
+    /// The plate aims the can by its straw tip, which sits low in the view.
     #[test]
-    fn a_can_with_room_around_it_is_not_turned() {
-        assert!(fits(NSPoint::new(120.0, 60.0), 0.0, plate(), None, SPAN));
+    fn the_spraying_can_is_aimed_by_its_tip() {
+        let tip = SPRAY.tip();
+        assert!(tip.y < 4.0 && tip.x < 12.0, "{tip:?}");
     }
 }

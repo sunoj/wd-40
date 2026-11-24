@@ -2,9 +2,10 @@
 // Exports: `HEADER_HEIGHT`, `SCAN_HEADER_HEIGHT`, `draw_header`, `draw_scan_header`.
 // Deps: crate::{disk_gauge, theme, widgets}, wd40.
 
+use crate::layout::{content_w, panel_w};
 use crate::disk_gauge::gauge_fractions;
 use crate::theme::Theme;
-use crate::widgets::{self, add_fill, add_line, label, label_right, label_tracked, CONTENT_WIDTH, PAD_X};
+use crate::widgets::{self, add_fill, add_line, label, label_right, label_tracked, PAD_X};
 use objc2_app_kit::NSView;
 use objc2_foundation::MainThreadMarker;
 use wd40::disk::DiskSpace;
@@ -29,21 +30,21 @@ pub struct HeaderModel {
 
 pub fn draw_header(parent: &NSView, y_top: f64, model: &HeaderModel, theme: &Theme, mtm: MainThreadMarker) {
     let y = y_top - HEADER_HEIGHT;
-    add_line(parent, 0.0, y, widgets::POPOVER_WIDTH, theme.line, mtm);
+    add_line(parent, 0.0, y, panel_w(), theme.line, mtm);
 
     let Some(disk) = model.disk else {
         label(
-            parent, "Disk unavailable", PAD_X, y_top - 28.0, CONTENT_WIDTH, 20.0, 14.0, false,
+            parent, "Disk unavailable", PAD_X, y_top - 28.0, content_w(), 20.0, 14.0, false,
             theme.ink_2, false, mtm,
         );
         return;
     };
 
-    let free = format!("{} free", human_size(disk.free_bytes));
+    let free = format!("{} free", scan_size(disk.free_bytes));
     label(parent, &free, PAD_X, y_top - 30.0, 220.0, 22.0, 20.0, true, theme.ink, false, mtm);
     let trailing = model.trailing.clone().unwrap_or_else(|| format!("of {}", human_size(disk.total_bytes)));
     label_right(
-        parent, &trailing, PAD_X + 200.0, y_top - 26.0, CONTENT_WIDTH - 200.0, 16.0, 11.5,
+        parent, &trailing, PAD_X + 200.0, y_top - 26.0, content_w() - 200.0, 16.0, 11.5,
         theme.ink_3, true, mtm,
     );
 
@@ -80,7 +81,7 @@ fn draw_detail(
     };
     if let Some(right) = right {
         label_right(
-            parent, &right, PAD_X + 180.0, y_top - 66.0, CONTENT_WIDTH - 180.0, 16.0, 11.5,
+            parent, &right, PAD_X + 180.0, y_top - 66.0, content_w() - 180.0, 16.0, 11.5,
             theme.ink_3, true, mtm,
         );
     }
@@ -124,9 +125,9 @@ impl ScanHeader {
 
 pub fn draw_scan_header(parent: &NSView, y_top: f64, model: &ScanHeader, theme: &Theme, mtm: MainThreadMarker) {
     let y = y_top - SCAN_HEADER_HEIGHT;
-    add_line(parent, 0.0, y, widgets::POPOVER_WIDTH, theme.line, mtm);
+    add_line(parent, 0.0, y, panel_w(), theme.line, mtm);
     let Some(disk) = model.disk else {
-        label(parent, "Disk unavailable", PAD_X, y_top - 38.0, CONTENT_WIDTH, 24.0, 14.0, false, theme.ink_2, false, mtm);
+        label(parent, "Disk unavailable", PAD_X, y_top - 38.0, content_w(), 24.0, 14.0, false, theme.ink_2, false, mtm);
         if model.in_progress() {
             let detail = if model.discovering {
                 "Finding build artifacts\u{2026}"
@@ -140,7 +141,7 @@ pub fn draw_scan_header(parent: &NSView, y_top: f64, model: &ScanHeader, theme: 
 
     let free = format!("{} free", scan_size(disk.free_bytes));
     label_tracked(parent, &free, PAD_X, y_top - 38.0, 220.0, 24.0, 20.0, true, theme.ink, false, -0.28, mtm);
-    label_right(parent, &format!("of {}", scan_size(disk.total_bytes)), PAD_X + 200.0, y_top - 35.0, CONTENT_WIDTH - 200.0, 16.0, 11.5, theme.ink_3, true, mtm);
+    label_right(parent, &format!("of {}", scan_size(disk.total_bytes)), PAD_X + 200.0, y_top - 35.0, content_w() - 200.0, 16.0, 11.5, theme.ink_3, true, mtm);
 
     let used = disk.total_bytes.saturating_sub(disk.free_bytes).min(disk.total_bytes);
     let reclaim_landed = crate::tasks::take_reclaim_landed();
@@ -179,7 +180,7 @@ pub fn draw_scan_header(parent: &NSView, y_top: f64, model: &ScanHeader, theme: 
     label(parent, &detail, PAD_X, y_top - 112.0, 230.0, 16.0, 11.5, false, theme.ink_3, true, mtm);
     if model.sizing() {
         let counted = format!("{} of {} measured", model.measured, model.total);
-        label_right(parent, &counted, PAD_X + 230.0, y_top - 112.0, CONTENT_WIDTH - 230.0, 16.0, 11.5, theme.ink_3, true, mtm);
+        label_right(parent, &counted, PAD_X + 230.0, y_top - 112.0, content_w() - 230.0, 16.0, 11.5, theme.ink_3, true, mtm);
     }
 }
 
@@ -193,7 +194,7 @@ fn draw_scan_gauge(
     theme: &Theme,
     mtm: MainThreadMarker,
 ) {
-    let w = CONTENT_WIDTH;
+    let w = content_w();
     add_fill(parent, PAD_X, y, w, 11.0, theme.pos, 0.26, 3.0, mtm);
     if model.discovering {
         let sweep = add_fill(parent, 0.0, y, 38.0, 11.0, theme.surface, 0.65, 3.0, mtm);
@@ -237,7 +238,7 @@ fn legend_layout(widths: [(f64, f64); 3]) -> [LegendItemLayout; 3] {
             SWATCH + AFTER_SWATCH + title + DISPLAY_EXTRA + BEFORE_VALUE + value + DISPLAY_EXTRA
         })
         .sum();
-    let gap = ((CONTENT_WIDTH - natural) / 2.0).max(8.0);
+    let gap = ((content_w() - natural) / 2.0).max(4.0);
     let mut x = PAD_X;
     std::array::from_fn(|index| {
         let (title_width, value_width) = widths[index];
@@ -260,14 +261,14 @@ fn draw_legend_row(
     let widths = std::array::from_fn(|index| {
         let (title, value, _) = &items[index];
         (
-            widgets::fitted_width(title, 12.5, false, mtm),
-            widgets::fitted_width(&value, 12.0, true, mtm),
+            widgets::fitted_width(title, 12.0, false, mtm),
+            widgets::fitted_width(&value, 11.5, true, mtm),
         )
     });
     for ((title, value, swatch), layout) in items.iter().zip(legend_layout(widths)) {
         add_fill(parent, layout.title_x - AFTER_SWATCH - SWATCH, y + 4.0, SWATCH, SWATCH, *swatch, 1.0, 2.0, mtm);
-        label(parent, title, layout.title_x, y, layout.title_width + 2.0, 17.0, 12.5, false, theme.ink, false, mtm);
-        label(parent, value, layout.value_x, y, layout.value_width + 2.0, 17.0, 12.0, false, theme.ink_2, true, mtm);
+        label(parent, title, layout.title_x, y, layout.title_width + 2.0, 17.0, 12.0, false, theme.ink, false, mtm);
+        label(parent, value, layout.value_x, y, layout.value_width + 2.0, 17.0, 11.5, false, theme.ink_2, true, mtm);
     }
 }
 
@@ -288,7 +289,7 @@ fn draw_gauge(
     mtm: MainThreadMarker,
 ) {
     let parts = gauge_fractions(disk, reclaimable);
-    let w = CONTENT_WIDTH;
+    let w = content_w();
     add_fill(parent, PAD_X, y, w, 7.0, theme.surface_2, 1.0, 3.5, mtm);
     let used_w = w * parts.used;
     let art_w = w * parts.artifacts;
@@ -298,7 +299,8 @@ fn draw_gauge(
 #[cfg(test)]
 mod tests {
     use super::{legend_layout, ScanHeader};
-    use crate::widgets::{CONTENT_WIDTH, PAD_X};
+    use crate::layout::content_w;
+    use crate::widgets::PAD_X;
 
     fn model(measured: usize, total: usize, discovering: bool, approximate: bool) -> ScanHeader {
         ScanHeader {
@@ -328,7 +330,7 @@ mod tests {
         // Worst realistic settled values: three 999.9G figures at the row's
         // measured title/value widths. The qualifier is intentionally below.
         let items = legend_layout([(65.0, 43.0), (38.0, 43.0), (25.0, 43.0)]);
-        let right_edge = PAD_X + CONTENT_WIDTH;
+        let right_edge = PAD_X + content_w();
         for item in items {
             assert!(item.title_x + item.title_width + 2.0 + 6.0 <= item.value_x);
             assert!(item.value_x + item.value_width + 2.0 <= right_edge);

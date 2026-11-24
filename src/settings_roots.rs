@@ -3,10 +3,11 @@
 // Exports: `draw_roots`, `add_root`, `remove_root`.
 // Deps: objc2 AppKit (NSOpenPanel); crate::{controls, names, state, widgets}.
 
+use crate::layout::{content_w};
 use crate::controls::text_button;
 use crate::state::AppState;
 use crate::theme::Theme;
-use crate::widgets::{self, add_fill, fitted_width, label, label_right, CONTENT_WIDTH, PAD_X};
+use crate::widgets::{self, add_fill, fitted_width, label, label_right, PAD_X};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::sel;
@@ -54,15 +55,15 @@ fn draw_root(
     mtm: MainThreadMarker,
 ) {
     let y = y_top - BOX_H;
-    let frame = add_fill(parent, PAD_X, y, CONTENT_WIDTH, BOX_H, theme.surface, 1.0, 7.0, mtm);
+    let frame = add_fill(parent, PAD_X, y, content_w(), BOX_H, theme.surface, 1.0, 7.0, mtm);
     frame.setBorderWidth(1.0);
     frame.setBorderColor(&Theme::color(theme.line));
     let path = crate::names::display_path(dir);
     label(parent, &path, PAD_X + 10.0, y + 8.0, 180.0, 16.0, 12.0, false, theme.ink, true, mtm);
     let found = holding(state, dir);
-    label_right(parent, &found, PAD_X + 190.0, y + 9.0, CONTENT_WIDTH - 190.0 - 28.0, 15.0, 11.0, theme.ink_3, true, mtm);
+    label_right(parent, &found, PAD_X + 190.0, y + 9.0, content_w() - 190.0 - 28.0, 15.0, 11.0, theme.ink_3, true, mtm);
     text_button(
-        parent, "\u{2715}", PAD_X + CONTENT_WIDTH - 26.0, y + 5.0, 20.0, sel!(settingsRemoveRoot:),
+        parent, "\u{2715}", PAD_X + content_w() - 26.0, y + 5.0, 20.0, sel!(settingsRemoveRoot:),
         target, crate::settings_view::TAG_ROOT_BASE + index as isize, theme.ink_4, mtm,
     );
 }

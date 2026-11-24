@@ -3,13 +3,14 @@
 // know it. Exports: `build`.
 // Deps: crate::{controls, header, medal, state, theme, widgets}, objc2, wd40.
 
+use crate::layout::{content_w, panel_w};
 use crate::controls::{filled_button, text_button};
 use crate::header::scan_size;
 use crate::medal::{medal, start_sheen, stop_sheen};
 use crate::state::{AppState, DoneSummary};
 use crate::theme::Theme;
 use crate::widgets::{
-    self, add_fill, add_line, label, label_right, CONTENT_WIDTH, PAD_X, POPOVER_WIDTH,
+    self, add_fill, add_line, label, label_right, PAD_X,
 };
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
@@ -34,7 +35,7 @@ pub fn build(state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainThrea
         Some(_) => HERO_H + rows as f64 * ROW_H + FOOTER_H,
         None => 64.0 + FOOTER_H,
     };
-    let root = widgets::root_view(height, theme.surface, mtm);
+    let root = widgets::root_view(panel_w(), height, theme, mtm);
 
     match summary {
         Some(s) => {
@@ -54,7 +55,7 @@ pub fn build(state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainThrea
             let _ = y;
         }
         None => {
-            label(&root, "Nothing was removed", PAD_X, height - 44.0, CONTENT_WIDTH, 22.0, 15.0, false, theme.ink_2, false, mtm);
+            label(&root, "Nothing was removed", PAD_X, height - 44.0, content_w(), 22.0, 15.0, false, theme.ink_2, false, mtm);
         }
     }
     draw_footer(&root, theme, target, mtm);
@@ -62,10 +63,10 @@ pub fn build(state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainThrea
 }
 
 fn draw_hero(root: &NSView, y_top: f64, s: &DoneSummary, theme: &Theme, mtm: MainThreadMarker) {
-    add_fill(root, 0.0, y_top - HERO_H, POPOVER_WIDTH, HERO_H, theme.pos, 0.05, 0.0, mtm);
-    add_fill(root, 0.0, y_top - 104.0, POPOVER_WIDTH, 104.0, theme.pos, 0.04, 0.0, mtm);
+    add_fill(root, 0.0, y_top - HERO_H, panel_w(), HERO_H, theme.pos, 0.05, 0.0, mtm);
+    add_fill(root, 0.0, y_top - 104.0, panel_w(), 104.0, theme.pos, 0.04, 0.0, mtm);
 
-    let disc = medal(NSRect::new(NSPoint::new((POPOVER_WIDTH - DISC) / 2.0, y_top - 94.0), NSSize::new(DISC, DISC)), theme.dark, mtm);
+    let disc = medal(NSRect::new(NSPoint::new((panel_w() - DISC) / 2.0, y_top - 94.0), NSSize::new(DISC, DISC)), theme.dark, mtm);
     root.addSubview(&disc);
     start_sheen(&disc);
 
@@ -75,8 +76,8 @@ fn draw_hero(root: &NSView, y_top: f64, s: &DoneSummary, theme: &Theme, mtm: Mai
 
     draw_bar(root, y_top - 182.0, s, theme, mtm);
     label(root, &format!("{} free", scan_size(s.free_after)), PAD_X, y_top - 204.0, 180.0, 18.0, 13.0, false, theme.ink, false, mtm);
-    label_right(root, &format!("was {}", scan_size(s.free_before)), PAD_X + 180.0, y_top - 203.0, CONTENT_WIDTH - 180.0, 16.0, 11.5, theme.ink_3, true, mtm);
-    add_line(root, 0.0, y_top - HERO_H, POPOVER_WIDTH, theme.line, mtm);
+    label_right(root, &format!("was {}", scan_size(s.free_before)), PAD_X + 180.0, y_top - 203.0, content_w() - 180.0, 16.0, 11.5, theme.ink_3, true, mtm);
+    add_line(root, 0.0, y_top - HERO_H, panel_w(), theme.line, mtm);
 }
 
 /// Used / just-reclaimed / already-free, straight from the volume's own before
@@ -85,10 +86,10 @@ fn draw_bar(root: &NSView, y: f64, s: &DoneSummary, theme: &Theme, mtm: MainThre
     if s.total_bytes == 0 {
         return;
     }
-    let scale = CONTENT_WIDTH / s.total_bytes as f64;
-    let used = (s.total_bytes.saturating_sub(s.free_after) as f64 * scale).clamp(0.0, CONTENT_WIDTH);
-    let back = (s.freed_bytes as f64 * scale).clamp(0.0, CONTENT_WIDTH - used);
-    add_fill(root, PAD_X, y, CONTENT_WIDTH, 11.0, theme.pos, 0.26, 3.0, mtm);
+    let scale = content_w() / s.total_bytes as f64;
+    let used = (s.total_bytes.saturating_sub(s.free_after) as f64 * scale).clamp(0.0, content_w());
+    let back = (s.freed_bytes as f64 * scale).clamp(0.0, content_w() - used);
+    add_fill(root, PAD_X, y, content_w(), 11.0, theme.pos, 0.26, 3.0, mtm);
     add_fill(root, PAD_X, y, used.max(0.5), 11.0, theme.ink_4, 1.0, 3.0, mtm);
     add_fill(root, PAD_X + used, y, back.max(0.5), 11.0, theme.pos, 0.7, 0.0, mtm);
 }
@@ -110,7 +111,7 @@ fn draw_row(
     label(root, &count.to_string(), PAD_X + 2.0, y + 9.0, 18.0, 16.0, 11.0, false, ink, true, mtm);
     label(root, title, PAD_X + 32.0, y + 9.0, 216.0, 16.0, 13.5, false, theme.ink, false, mtm);
     label_right(
-        root, size, PAD_X + 248.0, y + 9.0, CONTENT_WIDTH - 248.0, 16.0, 13.0,
+        root, size, PAD_X + 248.0, y + 9.0, content_w() - 248.0, 16.0, 13.0,
         if muted { theme.ink_3 } else { theme.ink }, true, mtm,
     );
     y
@@ -118,8 +119,8 @@ fn draw_row(
 
 
 fn draw_footer(root: &NSView, theme: &Theme, target: &AnyObject, mtm: MainThreadMarker) {
-    add_line(root, 0.0, FOOTER_H, POPOVER_WIDTH, theme.line, mtm);
-    filled_button(root, "Done", PAD_X, 30.0, CONTENT_WIDTH, sel!(handleDoneAck:), target, TAG_DONE, theme.ink, theme.surface, mtm);
+    add_line(root, 0.0, FOOTER_H, panel_w(), theme.line, mtm);
+    filled_button(root, "Done", PAD_X, 30.0, content_w(), sel!(handleDoneAck:), target, TAG_DONE, theme.ink, theme.surface, mtm);
     text_button(root, "Rescan", PAD_X, 6.0, 60.0, sel!(handleRescan:), target, crate::scan_view::TAG_RESCAN, theme.ink_2, mtm);
 }
 
@@ -132,7 +133,7 @@ fn centred(
     color: (f64, f64, f64),
     mtm: MainThreadMarker,
 ) -> Retained<NSTextField> {
-    let field = label(root, text, PAD_X, y, CONTENT_WIDTH, size + 8.0, size, bold, color, false, mtm);
+    let field = label(root, text, PAD_X, y, content_w(), size + 8.0, size, bold, color, false, mtm);
     field.setAlignment(NSTextAlignment::Center);
     field
 }

@@ -1,7 +1,10 @@
-// Scan-results popover body: grouped selectable targets and the clean CTA.
+// Scan-results screen: grouped selectable targets and the clean CTA. One column
+// in the popover; a sidebar and the full list in the window.
 // Exports: `build`, `draw_footer`, `header_model`, the screen's tags.
 // Deps: crate::{controls, header, live, menu_rows, scan_rows, state, widgets}.
 
+use crate::can::{can_view, STANDING};
+use crate::layout::{self, content_w, panel_w, with_width, POPOVER_WIDTH};
 use crate::controls::{clean_button, set_cmd_key, text_button_hint, text_button_underlined, CleanCta};
 use crate::header::{self, scan_size, ScanHeader};
 use crate::live::{self, Group, Row, Scan, Zone};
@@ -12,13 +15,13 @@ use crate::selection::group_selection;
 use crate::state::AppState;
 use crate::theme::Theme;
 use crate::widgets::{
-    self, add_line, label, CONTENT_WIDTH, PAD_X, POPOVER_WIDTH,
+    self, add_fill, add_line, label, PAD_X,
 };
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::sel;
 use objc2_app_kit::NSView;
-use objc2_foundation::MainThreadMarker;
+use objc2_foundation::{MainThreadMarker, NSPoint};
 use wd40::disk::sum_bytes;
 use wd40::scanner::sizes_may_overlap;
 
@@ -26,12 +29,13 @@ pub const TAG_CLEAN: isize = 2000;
 pub const TAG_RESCAN: isize = 2001;
 pub const TAG_SETTINGS: isize = 2002;
 pub const TAG_SHOW_MORE: isize = 2006;
+pub const TAG_WINDOW: isize = 2007;
 pub const TAG_ITEM_BASE: isize = 1000;
 pub const TAG_GROUP_BASE: isize = 3000;
 /// Well clear of the item tags, which run from `TAG_ITEM_BASE` one per row.
 pub const TAG_REVEAL_BASE: isize = 10_000;
 
-/// Match the mock: show the largest few, offer a link for the rest.
+/// How many rows a group shows in the popover before the rest fold away.
 const VISIBLE_CAP: usize = 6;
 /// Button, shortcuts and padding. The caveat line adds its own height only
 /// when there is a caveat.
@@ -47,40 +51,71 @@ fn footer_h(state: &AppState) -> f64 {
 const MAX_HEIGHT: f64 = 540.0;
 
 pub fn build(state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainThreadMarker) -> (Retained<NSView>, f64) {
+    match layout::window_size() {
+        Some((width, height)) => (build_wide(state, theme, target, width, height, mtm), height),
+        None => build_stacked(state, theme, target, mtm),
+    }
+}
+
+/// The popover: header, a capped list, and the footer in one column.
+fn build_stacked(state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainThreadMarker) -> (Retained<NSView>, f64) {
     let empty = state.empty_targets();
-    let plans = plan_groups(&state.targets, &empty, if state.show_all { usize::MAX } else { VISIBLE_CAP });
+    let plans = plan_groups(&state.targets, &empty, row_limit(state));
     let list_h = measure_list(&plans);
     let body_h = (MAX_HEIGHT - header::SCAN_HEADER_HEIGHT - footer_h(state)).min(list_h);
     let height = header::SCAN_HEADER_HEIGHT + body_h + footer_h(state);
-    let root = widgets::root_view(height, theme.surface, mtm);
-
-    // Header shows everything found; only the clean button counts the selection.
-    let header_zone = Zone::new(&root, height - header::SCAN_HEADER_HEIGHT, header::SCAN_HEADER_HEIGHT, mtm);
-    header::draw_scan_header(header_zone.view(), header_zone.top(), &header_model(state), theme, mtm);
-
-    let list = crate::scrolling::scroll_document_view(&root, 0.0, footer_h(state), POPOVER_WIDTH, body_h, list_h, mtm);
+    let root = widgets::root_view(panel_w(), height, theme, mtm);
+    let (header, footer) = draw_frame(&root, height, state, theme, target, mtm);
+    let list = crate::scrolling::scroll_document_view(&root, 0.0, footer_h(state), panel_w(), body_h, list_h, mtm);
     let (rows, groups) = draw_list(&list, state, &plans, list_h, theme, target, mtm);
-
-    let footer_zone = Zone::new(&root, 0.0, footer_h(state) + 1.0, mtm);
-    draw_footer(footer_zone.view(), state, theme, target, mtm);
-
-    live::install_scan(Scan {
-        theme: *theme,
-        header: header_zone,
-        footer: footer_zone,
-        rows,
-        groups,
-        membership: membership(state),
-    });
+    live::install_scan(Scan { theme: *theme, header, footer, rows, groups, membership: membership(state), list_w: panel_w() });
     (root, height)
+}
+
+/// The window: the popover's header and footer as a sidebar with the can
+/// between them, and every row of the list in the room to the right.
+fn build_wide(state: &AppState, theme: &Theme, target: &AnyObject, width: f64, height: f64, mtm: MainThreadMarker) -> Retained<NSView> {
+    let empty = state.empty_targets();
+    let plans = plan_groups(&state.targets, &empty, row_limit(state));
+    let root = widgets::root_view(width, height, theme, mtm);
+    let side = POPOVER_WIDTH;
+    add_fill(&root, side, 0.0, 1.0, height, theme.line, 1.0, 0.0, mtm);
+    let (header, footer) = draw_frame(&root, height, state, theme, target, mtm);
+    let (w, h) = STANDING.size;
+    let (floor, ceiling) = (footer_h(state), height - header::SCAN_HEADER_HEIGHT);
+    if ceiling - floor >= h + 32.0 {
+        let at = NSPoint::new((side - w) / 2.0, floor + (ceiling - floor - h) / 2.0);
+        root.addSubview(&can_view(STANDING, at, mtm));
+    }
+    let list_w = width - side - 1.0;
+    let (body_h, list_h) = (height - widgets::STRIPE_H, measure_list(&plans));
+    let list = crate::scrolling::scroll_document_view(&root, side + 1.0, 0.0, list_w, body_h, list_h, mtm);
+    let (rows, groups) = with_width(list_w, || draw_list(&list, state, &plans, list_h.max(body_h), theme, target, mtm));
+    live::install_scan(Scan { theme: *theme, header, footer, rows, groups, membership: membership(state), list_w });
+    root
+}
+
+/// Header at the top and footer at the bottom of a popover-wide column. The
+/// header shows everything found; only the clean button counts the selection.
+fn draw_frame(root: &NSView, height: f64, state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainThreadMarker) -> (Zone, Zone) {
+    let header = Zone::new(root, 0.0, height - header::SCAN_HEADER_HEIGHT, header::SCAN_HEADER_HEIGHT, mtm);
+    header.paint(|view, top| header::draw_scan_header(view, top, &header_model(state), theme, mtm));
+    let footer = Zone::new(root, 0.0, 0.0, footer_h(state) + 1.0, mtm);
+    footer.paint(|view, _| draw_footer(view, state, theme, target, mtm));
+    (header, footer)
+}
+
+/// The popover shows the largest few and offers a link for the rest; the
+/// window has the room, so it shows them all.
+fn row_limit(state: &AppState) -> usize {
+    if state.show_all || crate::window::is_visible() { usize::MAX } else { VISIBLE_CAP }
 }
 
 /// What this state would put on the scan list. Compared to the tree we last
 /// built so an open can reuse it only when the rows and counts still match.
 pub fn membership(state: &AppState) -> crate::menu_rows::Membership {
     let empty = state.empty_targets();
-    let limit = if state.show_all { usize::MAX } else { VISIBLE_CAP };
-    crate::menu_rows::Membership::of(&state.targets, &empty, limit)
+    crate::menu_rows::Membership::of(&state.targets, &empty, row_limit(state))
 }
 
 pub fn header_model(state: &AppState) -> ScanHeader {
@@ -137,7 +172,7 @@ fn draw_list(
     if plans.is_empty() && !state.sizing() && !crate::tasks::is_scanning() {
         label(
             root, "Nothing to clean \u{2014} everything is tidy", PAD_X, list_bottom + 20.0,
-            CONTENT_WIDTH, 20.0, 13.0, false, theme.ink_2, false, mtm,
+            content_w(), 20.0, 13.0, false, theme.ink_2, false, mtm,
         );
     }
     (rows, groups)
@@ -173,13 +208,13 @@ fn draw_show_more(
 ) -> f64 {
     if plan.hidden > 0 && y > list_bottom + 40.0 {
         text_button_underlined(
-            root, &show_more_title(state, plan), PAD_X, y - 28.0, CONTENT_WIDTH,
+            root, &show_more_title(state, plan), PAD_X, y - 28.0, content_w(),
             sel!(handleShowMore:), target, TAG_SHOW_MORE, theme.ink_2, mtm,
         );
         y -= 40.0;
     }
     if y > list_bottom + 8.0 {
-        add_line(root, PAD_X, y - 4.0, CONTENT_WIDTH, theme.line, mtm);
+        add_line(root, PAD_X, y - 4.0, content_w(), theme.line, mtm);
         y -= 8.0;
     }
     y
@@ -221,19 +256,24 @@ pub fn draw_footer(
     target: &AnyObject,
     mtm: MainThreadMarker,
 ) {
-    add_line(parent, 0.0, footer_h(state), POPOVER_WIDTH, theme.line, mtm);
-    clean_button(parent, &clean_cta(state), PAD_X, footer_h(state) - 47.0, CONTENT_WIDTH, sel!(handleCleanSelected:), target, TAG_CLEAN, theme, mtm);
+    add_line(parent, 0.0, footer_h(state), panel_w(), theme.line, mtm);
+    clean_button(parent, &clean_cta(state), PAD_X, footer_h(state) - 47.0, content_w(), sel!(handleCleanSelected:), target, TAG_CLEAN, theme, mtm);
     let mut line_y = footer_h(state) - 69.0;
     if let Some(receipt) = crate::auto_clean::receipt_line() {
-        label(parent, &receipt, PAD_X, line_y, CONTENT_WIDTH, 16.0, 11.0, false, theme.ink_3, false, mtm);
+        label(parent, &receipt, PAD_X, line_y, content_w(), 16.0, 11.0, false, theme.ink_3, false, mtm);
         line_y -= RECEIPT_H;
     }
     if let Some(caveat) = footer_caveat(state) {
-        label(parent, &caveat, PAD_X, line_y, CONTENT_WIDTH, 16.0, 11.5, false, theme.ink_3, false, mtm);
+        label(parent, &caveat, PAD_X, line_y, content_w(), 16.0, 11.5, false, theme.ink_3, false, mtm);
     }
     let rescan = text_button_hint(parent, "Rescan", "\u{2318}R", PAD_X, 13.0, sel!(handleRescan:), target, TAG_RESCAN, theme.ink_2, theme.ink_4, mtm);
     set_cmd_key(&rescan, "r");
-    let settings = text_button_hint(parent, "Settings", "\u{2318},", POPOVER_WIDTH - PAD_X - 96.0, 13.0, sel!(openSettings:), target, TAG_SETTINGS, theme.ink_2, theme.ink_4, mtm);
+    // The window is where this footer already is when it is open.
+    if !crate::window::is_visible() {
+        let window = text_button_hint(parent, "Window", "\u{2318}O", (panel_w() - 86.0) / 2.0, 13.0, sel!(openWindow:), target, TAG_WINDOW, theme.ink_2, theme.ink_4, mtm);
+        set_cmd_key(&window, "o");
+    }
+    let settings = text_button_hint(parent, "Settings", "\u{2318},", panel_w() - PAD_X - 96.0, 13.0, sel!(openSettings:), target, TAG_SETTINGS, theme.ink_2, theme.ink_4, mtm);
     set_cmd_key(&settings, ",");
 }
 
