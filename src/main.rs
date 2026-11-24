@@ -14,6 +14,7 @@ mod crust;
 mod disk_gauge;
 mod done_view;
 mod header;
+mod header_legend;
 mod hover_row;
 mod icon;
 mod layout;
@@ -44,6 +45,7 @@ mod smoke;
 mod startup;
 mod state;
 mod status;
+mod status_menu;
 mod style;
 mod surface;
 mod tasks;
@@ -76,6 +78,9 @@ define_class!(
     impl MenuHandler {
         #[unsafe(method(togglePopover:))]
         fn toggle_popover(&self, _sender: &AnyObject) {
+            if status_menu::requested(self.mtm()) {
+                return status_menu::show(self.mtm());
+            }
             popover::toggle(self.mtm());
         }
 

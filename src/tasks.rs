@@ -240,8 +240,6 @@ pub fn on_sizes_done(mtm: MainThreadMarker) {
     crate::surface::refresh(mtm);
     #[cfg(debug_assertions)]
     crate::screenshot::maybe_start(mtm);
-    #[cfg(debug_assertions)]
-    crate::smoke::maybe_start();
 }
 
 /// Start the physical accounting pass after the first selection intent. It is

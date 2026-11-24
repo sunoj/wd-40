@@ -32,7 +32,8 @@ pub fn attach(mtm: MainThreadMarker) {
         // the moment you press outside it — including on this button — so by
         // mouse-up it is already closed and the toggle would just reopen it,
         // which reads as a popover that cannot be clicked shut.
-        button.sendActionOn(NSEventMask::LeftMouseDown);
+        // The right button asks for the status menu instead.
+        button.sendActionOn(NSEventMask::LeftMouseDown | NSEventMask::RightMouseDown);
         button.setToolTip(Some(&NSString::from_str("WD-40")));
     }
     ensure_popover(mtm);

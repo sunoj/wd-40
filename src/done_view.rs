@@ -120,7 +120,7 @@ fn draw_row(
 
 fn draw_footer(root: &NSView, theme: &Theme, target: &AnyObject, mtm: MainThreadMarker) {
     add_line(root, 0.0, FOOTER_H, panel_w(), theme.line, mtm);
-    filled_button(root, "Done", PAD_X, 30.0, content_w(), sel!(handleDoneAck:), target, TAG_DONE, theme.ink, theme.surface, mtm);
+    filled_button(root, "Done", PAD_X, 30.0, content_w(), sel!(handleDoneAck:), target, TAG_DONE, theme.cta, theme.cta_ink, mtm);
     text_button(root, "Rescan", PAD_X, 6.0, 60.0, sel!(handleRescan:), target, crate::scan_view::TAG_RESCAN, theme.ink_2, mtm);
 }
 

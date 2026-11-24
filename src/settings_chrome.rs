@@ -1,7 +1,7 @@
 // Fixed header and footer for the settings screen.
 use crate::layout::{panel_w};
 use crate::controls::{set_cmd_key, text_button};
-use crate::theme::Theme;
+use crate::theme::{hex, Theme, CAN_BLUE, CAN_YELLOW};
 use crate::widgets::{self, add_fill, add_line, fitted_width, label, PAD_X};
 use objc2::runtime::AnyObject;
 use objc2::sel;
@@ -13,9 +13,10 @@ pub(crate) const FOOTER_H: f64 = 44.0;
 
 pub(crate) fn draw_brand(parent: &NSView, y_top: f64, theme: &Theme, mtm: MainThreadMarker) {
     let tile = y_top - 44.0;
-    add_fill(parent, PAD_X, tile, 30.0, 30.0, theme.ink, 1.0, 8.0, mtm);
+    // The can's blue body and the yellow of its label.
+    add_fill(parent, PAD_X, tile, 30.0, 30.0, hex(CAN_BLUE), 1.0, 8.0, mtm);
     let mark = fitted_width("40", 11.0, true, mtm);
-    label(parent, "40", PAD_X + (30.0 - mark) / 2.0, tile + 7.0, mark + 2.0, 16.0, 11.0, false, theme.surface, true, mtm);
+    label(parent, "40", PAD_X + (30.0 - mark) / 2.0, tile + 7.0, mark + 2.0, 16.0, 11.0, false, hex(CAN_YELLOW), true, mtm);
     label(parent, "WD-40", PAD_X + 41.0, tile + 14.0, 120.0, 18.0, 14.5, true, theme.ink, false, mtm);
     let version = format!("v{}", crate::updater::bundle_version());
     label(parent, &version, PAD_X + 41.0, tile - 1.0, 160.0, 15.0, 11.0, false, theme.ink_3, true, mtm);

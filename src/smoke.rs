@@ -1,12 +1,12 @@
-// Smoke run for the window: open it, clean a throwaway fixture through the real
-// clean path, close it, quit. Debug builds only; activated by WD40_SMOKE_ROOT,
+// Smoke run for the window: open it, resize it, clean a throwaway fixture
+// through the real clean path, close it, quit. Debug builds only; activated by WD40_SMOKE_ROOT,
 // which names the only directory the run is allowed to remove anything under.
 // Deps: crate::{mainthread, plate, state, surface, tasks, window}.
 
 use crate::mainthread::run_on_main;
 use crate::state::{with_state_ret, UiScreen};
 use crate::{surface, tasks, window};
-use objc2_foundation::MainThreadMarker;
+use objc2_foundation::{MainThreadMarker, NSSize};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -23,10 +23,18 @@ pub fn maybe_start() {
     }
     std::thread::spawn(|| {
         let pause = |ms: u64| std::thread::sleep(Duration::from_millis(ms));
-        pause(300);
+        // The startup scan has to settle first: its sizes are what gets ticked.
+        pause(500);
+        while tasks::is_busy() {
+            pause(100);
+        }
         run_on_main(open);
-        pause(700);
+        pause(500);
+        run_on_main(|| resize(1180.0, 720.0));
+        pause(500);
         run_on_main(clean);
+        pause(150);
+        run_on_main(|| resize(900.0, 600.0));
         // The cleaning screen holds for its minimum time, then hands over.
         for _ in 0..150 {
             pause(200);
@@ -53,6 +61,14 @@ fn open() {
     let Some(mtm) = MainThreadMarker::new() else { return };
     window::open(mtm);
     eprintln!("smoke: window opened, visible={}", window::is_visible());
+}
+
+/// Resize the window, which rebuilds whatever screen is up at the new size.
+fn resize(width: f64, height: f64) {
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    let Some(window) = window::content_view(mtm).and_then(|view| view.window()) else { return };
+    window.setContentSize(NSSize::new(width, height));
+    eprintln!("smoke: resized to {width}x{height}, content is {:?}", window::content_size(mtm));
 }
 
 /// Tick exactly the targets under the smoke root and start the real clean.

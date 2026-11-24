@@ -51,7 +51,7 @@ pub fn build(
     target: &AnyObject,
     mtm: MainThreadMarker,
 ) -> (Retained<NSView>, f64) {
-    let sheet = widgets::root_view(panel_w(), SHEET_H, theme, mtm);
+    let sheet = widgets::sheet_view(panel_w(), SHEET_H, theme, mtm);
     let used = SHEET_H - draw_body(&sheet, SHEET_H, state, theme, target, mtm);
 
     let body_limit = MAX_HEIGHT - BRAND_H - FOOTER_H + disclosure_height();

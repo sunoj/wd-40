@@ -147,7 +147,10 @@ pub fn draw_strip(root: &NSView, y_top: f64, p: &CleanProgress, theme: &Theme, m
     let total = sum_bytes(p.items.iter().map(|i| i.size_bytes));
     let done = if total == 0 { 0.0 } else { p.freed_so_far as f64 / total as f64 };
     add_fill(root, PAD_X, y_top - 22.0, content_w(), 11.0, theme.surface_3, 1.0, 3.0, mtm);
-    add_fill(root, PAD_X, y_top - 22.0, (content_w() * done.clamp(0.0, 1.0)).max(0.5), 11.0, theme.pos, 1.0, 3.0, mtm);
+    // Nothing is drawn for nothing freed: a sliver of bar would claim a start.
+    if done > 0.0 {
+        add_fill(root, PAD_X, y_top - 22.0, (content_w() * done.min(1.0)).max(6.0), 11.0, theme.pos, 1.0, 3.0, mtm);
+    }
     label(root, &status_line(p), PAD_X, y_top - 42.0, 230.0, 16.0, 12.5, false, theme.ink, false, mtm);
     if let Some(eta) = eta_label(p, so_far) {
         label_right(root, &eta, PAD_X + 230.0, y_top - 42.0, content_w() - 230.0, 16.0, 11.5, theme.ink_3, true, mtm);

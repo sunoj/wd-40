@@ -12,6 +12,8 @@ use wd40::disk::DiskSpace;
 
 /// Height of the plate in the popover. The window gives it what room it has.
 pub const PLATE_H: f64 = 190.0;
+/// Largest radius of the turning marks at the plate's centre.
+const RINGS: f64 = 96.0;
 /// Steel left showing round the crust, so the rust reads as lying on a plate.
 const RIM: f64 = 7.0;
 
@@ -50,7 +52,9 @@ pub fn paint_steel(bounds: NSRect, dark: bool, tiles: &[Tile]) {
     NSBezierPath::bezierPathWithRoundedRect_xRadius_yRadius(bounds, 10.0, 10.0).addClip();
     brushed(bounds, dark);
     let centre = NSPoint::new(bounds.size.width / 2.0, bounds.size.height / 2.0);
-    rings(centre, bounds.size.height * 0.44, dark);
+    // The turning marks keep the size they have in the popover: on the
+    // window's plate they would otherwise swallow it.
+    rings(centre, (bounds.size.height * 0.44).min(RINGS), dark);
     grey(if dark { 0.9 } else { 0.2 }, 0.22).setStroke();
     for tile in tiles {
         outline(inset(tile.rect, 1.5), 1.0);
@@ -65,6 +69,8 @@ pub fn paint_steel(bounds: NSRect, dark: bool, tiles: &[Tile]) {
 /// right now carries a bright rim; one the run left behind is hatched, so it
 /// does not read as work still queued.
 pub fn paint_tile(bounds: NSRect, index: usize, state: u8) {
+    // Pits near an edge would otherwise spill onto the steel beside the tile.
+    NSBezierPath::bezierPathWithRect(bounds).addClip();
     let (r, g, b) = rust_tone(index);
     NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, 1.0).setFill();
     NSBezierPath::fillRect(bounds);
@@ -91,7 +97,6 @@ pub fn paint_tile(bounds: NSRect, index: usize, state: u8) {
 
 /// Diagonal strokes over a tile that is staying on the plate.
 fn hatch(bounds: NSRect) {
-    NSBezierPath::bezierPathWithRect(bounds).addClip();
     grey(0.08, 0.3).setStroke();
     let mut x = -bounds.size.height;
     while x < bounds.size.width {

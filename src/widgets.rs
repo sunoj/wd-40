@@ -22,17 +22,23 @@ pub const STRIPE_H: f64 = 3.0;
 /// not settled the first time the popover was shown. A plain fill renders the
 /// same every time, in the popover and in the window.
 pub fn root_view(width: f64, height: f64, theme: &Theme, mtm: MainThreadMarker) -> Retained<NSView> {
-    let view = NSView::initWithFrame(
-        NSView::alloc(mtm),
-        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(width, height)),
-    );
-    add_fill(&view, 0.0, 0.0, width, height, theme.surface, 1.0, 0.0, mtm);
+    let view = sheet_view(width, height, theme, mtm);
     // Blue body, yellow band, red cap, in the can's own proportions.
     let mut x = 0.0;
     for (colour, share) in [(CAN_BLUE, 0.62), (CAN_YELLOW, 0.26), (CAN_RED, 0.12)] {
         add_fill(&view, x, height - STRIPE_H, width * share, STRIPE_H, hex(colour), 1.0, 0.0, mtm);
         x += width * share;
     }
+    view
+}
+
+/// The same surface without the label: content that scrolls inside a screen.
+pub fn sheet_view(width: f64, height: f64, theme: &Theme, mtm: MainThreadMarker) -> Retained<NSView> {
+    let view = NSView::initWithFrame(
+        NSView::alloc(mtm),
+        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(width, height)),
+    );
+    add_fill(&view, 0.0, 0.0, width, height, theme.surface, 1.0, 0.0, mtm);
     view
 }
 

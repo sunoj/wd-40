@@ -26,15 +26,15 @@ impl CheckBox {
     pub fn set(&self, selection: GroupSelection, theme: &Theme) {
         let on = selection == GroupSelection::On;
         self.fill.setFillColor(&Theme::color_alpha(
-            if on { theme.ink } else { theme.surface_2 },
+            if on { theme.accent } else { theme.surface_2 },
             if on { 1.0 } else { 0.78 },
         ));
         self.fill.setBorderWidth(if on { 0.0 } else { 1.0 });
         self.fill.setBorderColor(&Theme::color(theme.line_2));
         self.dash.setHidden(selection != GroupSelection::Mixed);
-        self.dash.setFillColor(&Theme::color(theme.ink));
+        self.dash.setFillColor(&Theme::color(theme.accent));
         self.button
-            .setAttributedTitle(&attributed(tick(on), theme.surface, 10.0, true));
+            .setAttributedTitle(&attributed(tick(on), crate::controls::WHITE, 10.0, true));
     }
 }
 
@@ -59,7 +59,7 @@ pub fn checkbox(
     mtm: MainThreadMarker,
 ) -> CheckBox {
     let fill = add_fill(parent, x, y, SIDE, SIDE, theme.surface_2, 0.78, 4.0, mtm);
-    let dash = add_fill(parent, x + 3.0, y + 6.5, 9.0, 2.0, theme.ink, 1.0, 1.0, mtm);
+    let dash = add_fill(parent, x + 3.0, y + 6.5, 9.0, 2.0, theme.accent, 1.0, 1.0, mtm);
     let button = unsafe {
         NSButton::buttonWithTitle_target_action(
             &NSString::from_str(""),

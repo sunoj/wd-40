@@ -44,5 +44,8 @@ pub(crate) fn run() {
         tasks::start_auto_clean(auto_hours);
     }
 
+    #[cfg(debug_assertions)]
+    crate::smoke::maybe_start();
+
     app.run();
 }
