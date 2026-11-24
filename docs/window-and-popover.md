@@ -27,6 +27,8 @@ view tree.
   menu bar item. There is no system-wide hotkey.
 - Close: the close button or `⌘W`. Closing hides the window (`orderOut`); the
   `NSWindow` is created once, has `releasedWhenClosed` off, and is reused.
+- The window cannot be minimised. A minimised window reports itself as not
+  visible, which would make the popover the live surface beside it.
 - Closing stops nothing. A scan or a clean in flight carries on, and the
   popover shows it from the same state the next time it is opened.
 - Opening either surface stops an unattended auto-clean pass before it starts

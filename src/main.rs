@@ -1,6 +1,6 @@
-// Entry point for the macOS WD-40 status-item popover app.
+// Entry point for the macOS WD-40 menu bar app.
 // Owns the status item, app state, and Objective-C action handler.
-// Deps: objc2 AppKit; UI in `popover` + views; work in `tasks`.
+// Deps: objc2 AppKit; UI in `surface` (popover or window) + views; work in `tasks`.
 
 mod actions;
 mod auto_clean;

@@ -6,6 +6,7 @@
 use crate::mainthread::run_on_main;
 use crate::state::{with_state_ret, UiScreen};
 use crate::{surface, tasks, window};
+use objc2::msg_send;
 use objc2_foundation::{MainThreadMarker, NSSize};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -57,10 +58,12 @@ fn with_done() -> bool {
     DONE.load(Ordering::Relaxed)
 }
 
+/// Open the window the way the popover's button and the status menu do: by
+/// sending the handler its action.
 fn open() {
-    let Some(mtm) = MainThreadMarker::new() else { return };
-    window::open(mtm);
-    eprintln!("smoke: window opened, visible={}", window::is_visible());
+    let Some(handler) = crate::HANDLER.with(|cell| cell.borrow().clone()) else { return };
+    let _: () = unsafe { msg_send![&*handler, openWindow: &*handler] };
+    eprintln!("smoke: openWindow: sent, visible={}", window::is_visible());
 }
 
 /// Resize the window, which rebuilds whatever screen is up at the new size.
@@ -104,8 +107,11 @@ fn close() {
     eprintln!("smoke: done screen={}, summary freed={freed:?}", on_screen(UiScreen::Done));
     let paints = crate::plate::STEEL_PAINTS.load(Ordering::Relaxed);
     eprintln!("smoke: plate steel painted {paints} time(s) during the run");
-    window::close(mtm);
-    eprintln!("smoke: window closed, visible={}, any surface open={}", window::is_visible(), surface::is_open());
+    // The close button's own path, through the delegate's windowShouldClose:.
+    if let Some(window) = window::content_view(mtm).and_then(|view| view.window()) {
+        window.performClose(None);
+    }
+    eprintln!("smoke: performClose: sent, visible={}, any surface open={}", window::is_visible(), surface::is_open());
 }
 
 fn quit() {

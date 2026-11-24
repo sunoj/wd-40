@@ -1,6 +1,6 @@
-// Background scan/clean orchestration for the WD-40 popover app.
+// Background scan/clean orchestration for the WD-40 menu bar app.
 // Exports: scan/clean spawners, timer control, main-thread completion hooks.
-// Deps: objc2, crate::{live, mainthread, names, popover, state, tasks_clean}.
+// Deps: objc2, crate::{live, mainthread, names, state, surface, tasks_clean}.
 
 use crate::live;
 use crate::state::{

@@ -162,6 +162,20 @@ pub fn draw_scan_header(parent: &NSView, y_top: f64, model: &ScanHeader, theme: 
         mtm,
     );
 
+    draw_scan_detail(parent, y_top, disk, reclaimable, model, theme, mtm);
+}
+
+/// The line under the legend: what cleaning would leave free, or what the scan
+/// is still doing, and how far through the measuring it is.
+fn draw_scan_detail(
+    parent: &NSView,
+    y_top: f64,
+    disk: DiskSpace,
+    reclaimable: u64,
+    model: &ScanHeader,
+    theme: &Theme,
+    mtm: MainThreadMarker,
+) {
     let after = disk.free_bytes.saturating_add(reclaimable).min(disk.total_bytes);
     let bound = if model.sizing() {
         "at least "

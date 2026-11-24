@@ -1,6 +1,6 @@
 // Unattended clean policy and runner, independent of manual row selection.
 // Exports: timer entry point, receipt text, pending-snapshot application.
-// Deps: crate::{names, popover, state, tasks}, wd40 scan/clean APIs.
+// Deps: crate::{names, state, surface, tasks}, wd40 scan/clean APIs.
 
 use crate::names::display_names;
 use crate::state::{with_state, with_state_ret, UiScreen};

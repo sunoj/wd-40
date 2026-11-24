@@ -179,10 +179,10 @@ fn ensure(mtm: MainThreadMarker) -> Retained<NSWindow> {
     if let Some(window) = WINDOW.with(|cell| cell.borrow().clone()) {
         return window;
     }
-    let style = NSWindowStyleMask::Titled
-        | NSWindowStyleMask::Closable
-        | NSWindowStyleMask::Miniaturizable
-        | NSWindowStyleMask::Resizable;
+    // Not miniaturizable: with no Dock icon there is nowhere obvious to bring
+    // a minimised window back from, and a minimised window is not visible, so
+    // the popover would open beside it.
+    let style = NSWindowStyleMask::Titled | NSWindowStyleMask::Closable | NSWindowStyleMask::Resizable;
     let rect = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(DEFAULT_SIZE.0, DEFAULT_SIZE.1));
     let window = unsafe {
         NSWindow::initWithContentRect_styleMask_backing_defer(

@@ -1,6 +1,6 @@
 // Settings and popover action helpers invoked from MenuHandler.
 // Exports: free functions that mutate AppState / spawn work.
-// Deps: crate::{autostart, popover, settings_view, state, tasks}, wd40::config.
+// Deps: crate::{autostart, settings_view, state, surface, tasks}, wd40::config.
 
 use crate::settings_view;
 use crate::state::{with_state, with_state_ret, UiScreen};
