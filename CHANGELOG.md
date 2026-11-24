@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.8.0] — 2026-11-24
 
 ### Added
 - **A resizable window** (`src/window.rs`, `src/surface.rs`, `src/usage_map.rs`): the same four screens as the popover, with the full list in a column and a usage map beside it: every target as a tile sized by its bytes and coloured by its group, solid when ticked, clickable to tick. The cleaning screen uses that same map as its plate. Open it with ⌘O or "Window" in the popover, or "Open WD-40 Window" on a right click of the menu bar item; ⌘W closes it. One surface is live at a time and the app has no Dock icon either way. See `docs/window-and-popover.md`.
@@ -8,7 +8,6 @@
 ### Changed
 - **New look** (`src/theme.rs`): the can's label colours on steel greys. Rust orange marks what can be reclaimed and what is ticked, the can's blue marks free space, the clean button is the label's yellow band, and every screen carries the label stripe along its top edge.
 - **The cleaning plate plays each removal in turn** (`src/plate.rs`, `src/choreo.rs`, `src/tile.rs`): the steel is painted once, each target is a tile of its own, and when a target has really been removed the can crosses to its tile and the tile rises off the steel. Removals that land faster than that are queued and played one after another; the done screen waits for the last. There is no per-frame timer. The crust now covers the whole plate; the job's share of the volume is given in the line under it. Pointer spraying, the mist and the wipe mask are gone.
-- **Row size bars are a thin meter under each row** (`src/scan_rows.rs`) instead of a wash behind it, which stepped down the list and ran off its left edge.
 
 - **Done and settings fill the window** (`src/done_view.rs`, `src/settings_frame.rs`): done is the result column beside the map as the run left it; settings is a reading-width column on one surface. The done screen's rows are headed "size as scanned", and a note names both figures when they differ from the free space the volume gained.
 
@@ -18,6 +17,10 @@
 - **A large group scrolls inside itself** (`src/group_scroll.rs`): past seven rows a group's rows sit in a scroll view of their own under the group header, with a fade at each edge that has more. At an end the wheel passes to the list around it. Each group's offset is kept across rebuilds.
 
 - **The scan screen says its verdict once** (`src/scan_verdict.rs`, `src/header.rs`, `src/scan_rows.rs`): one line under the gauge says how many targets are old and how much they hold, and the legend names the found space "Artifacts" rather than "Reclaimable". A group with nothing old carries a green check only when another group has old targets. The banner, the per-group line, the "Show N more" links, the green and grey buttons, the row underline, the group icons, the RECENT badge and the footer's tick line are gone; a row's age is its one sign of old or recent, and a cache row now shows its age too. The reveal-in-Finder control shows only on the row under the pointer. The note that sizes overlap where builds share APFS clones is the tooltip of an info mark beside the verdict. Rows are 34pt and paths keep their tail.
+- **The clean button is there only while something is ticked**: with nothing ticked the footer holds the shortcuts alone.
+- **A switch for colour in the menu bar** (Settings → Scanning): off keeps the glyph and the figure monochrome at every size.
+- **Tick-the-old-batch leaves simulator devices and toolchains alone**, as auto-clean does: their age says nothing about whether they are in use.
+- **Group scrolling keeps AppKit's responsive scrolling**, and the row under a still pointer stays the only one lit while a group scrolls.
 - **All clear is the verdict line, not a screen**: when nothing is past the keep threshold the verdict reads "✓ All clear · nothing older than 7d" with "next in Nd", and the tooltip names the next target to turn old. The groups stay listed as single folded lines.
 
 ### Fixed

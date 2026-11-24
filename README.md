@@ -10,12 +10,13 @@ WD-40 finds and cleans validated build output and developer caches to reclaim di
 
 A native macOS status bar utility with zero-config scanning.
 
-- **Visual Status**: Icon gets "rustier" as build artifacts grow
-- **Disk Panel**: Free space is the headline number, over a capacity gauge that shows the artifact slice in orange and what cleaning it would leave
-- **Grouped Results**: Rust, Node Modules, Build Output, Caches, and Toolchains — every group keeps rows of its own, with aligned size columns and usage bars
-- **Readable Names**: The name column sizes itself to the projects on screen, and same-named projects gain the directory that tells them apart
-- **Hover for the Path**: Pointing at a row swaps the short name for its full path and how stale it is
-- **One-Click Clean**: Individual projects, by group, all, or old only
+- **Visual Status**: Icon gets "rustier" as build artifacts grow (a Settings switch keeps it monochrome)
+- **One Verdict**: Under the disk gauge, one line says how many targets are past the age threshold and how much they hold, with "Tick them" beside it, or "All clear" and when the next one turns old
+- **Grouped Results**: Rust, Node Modules, Build Output, Caches, Toolchains, and Simulators — one line per group that unfolds; a large group scrolls inside itself
+- **Hover for the Path**: Pointing at a row swaps its age for its full path and shows the reveal-in-Finder control
+- **Window** (⌘O): the full list beside a usage map of every target, sized by its bytes and clickable to tick
+- **Cleaning You Can Watch**: each target is a tile on a steel plate, and a tile lifts only after its directory is really gone
+- **One-Click Clean**: Individual projects, by group, or the whole old batch
 - **Auto Scan**: Refreshes every 5 minutes
 - **Auto Clean**: Configurable interval (1h/6h/12h/24h) + age threshold
 - **Settings Window** (⌘,): Launch at Login, auto-clean cadence, age threshold, artifact types, and update preferences in one panel
