@@ -1,8 +1,7 @@
 // The scan header's last line: the screen's one verdict on what can safely be
 // cleaned, the action that ticks it, and the note on what a size means. It is
 // a zone of its own, so a tick repaints this line and not the gauge above it.
-// Exports: `VERDICT_H`, `Verdict`, `verdict`, `draw`.
-// Deps: crate::{controls, header, selection, state, tasks, widgets}.
+// Exports: `VERDICT_H`, `Verdict`, `verdict`, `draw`. Deps: crate::{controls, selection, state}.
 
 use crate::controls::text_button_underlined;
 use crate::header::scan_size;
@@ -19,7 +18,7 @@ use wd40::disk::sum_bytes;
 
 /// The strip along the bottom of the scan header that the verdict is drawn in.
 pub const VERDICT_H: f64 = 30.0;
-const TAG_TICK_OLD: isize = 2008;
+pub const TAG_TICK_OLD: isize = 2008;
 const TAG_HIDE_LIST: isize = 2006;
 const TEXT_Y: f64 = 13.0;
 const INFO: f64 = 12.0;
@@ -33,8 +32,9 @@ pub enum Verdict {
     /// Nothing listed is past the keep threshold. `listed` is true when the
     /// list is on show only because it was asked for, and can be put away.
     Clear { days: u64, listed: bool },
-    /// The batch tick-old stands for. `ceiling`: the size is a scanned sum.
-    Old { count: usize, bytes: u64, ticked: bool, ceiling: bool, days: u64 },
+    /// The batch tick-old stands for. `bytes` is a sum of scanned sizes, so
+    /// it is always quoted as a ceiling.
+    Old { count: usize, bytes: u64, ticked: bool, days: u64 },
     /// Old targets, but only of the kinds the batch leaves alone.
     ByHand { count: usize, days: u64 },
 }
@@ -52,8 +52,7 @@ pub fn verdict(state: &AppState) -> Verdict {
     let old = old_targets(&state.targets, &empty, days);
     if !old.is_empty() {
         let bytes = sum_bytes(old.iter().map(|index| state.targets[*index].size_bytes));
-        let ceiling = !state.reclaim.as_ref().is_some_and(|found| found.covers(&state.targets));
-        return Verdict::Old { count: old.len(), bytes, ticked: old.is_subset(&state.selected), ceiling, days };
+        return Verdict::Old { count: old.len(), bytes, ticked: old.is_subset(&state.selected), days };
     }
     if state.targets.len() == empty.len() {
         return Verdict::Nothing;
@@ -76,10 +75,7 @@ impl Verdict {
             Self::Clear { days, .. } => format!("\u{2713} All clear \u{00b7} nothing older than {days}d"),
             // Ticked, the size is the clean button's to state: it has the exact one.
             Self::Old { count, ticked: true, .. } => format!("All {count} old ticked"),
-            Self::Old { count, bytes, ceiling, .. } => {
-                let bound = if *ceiling { "up to " } else { "" };
-                format!("{count} old \u{00b7} {bound}{} can go", scan_size(*bytes))
-            }
+            Self::Old { count, bytes, .. } => format!("{count} old \u{00b7} up to {} can go", scan_size(*bytes)),
             Self::ByHand { count, .. } => format!("{count} old devices/toolchains \u{00b7} tick by hand"),
         }
     }
@@ -142,10 +138,9 @@ mod tests {
 
     #[test]
     fn each_state_says_one_thing() {
-        let old = |ticked, ceiling| Verdict::Old { count: 230, bytes: 3 << 30, ticked, ceiling, days: 7 };
-        assert_eq!(old(false, true).text(), "230 old \u{00b7} up to 3.0 GB can go");
-        assert_eq!(old(false, false).text(), "230 old \u{00b7} 3.0 GB can go");
-        assert_eq!(old(true, true).text(), "All 230 old ticked");
+        let old = |ticked| Verdict::Old { count: 230, bytes: 3 << 30, ticked, days: 7 };
+        assert_eq!(old(false).text(), "230 old \u{00b7} up to 3.0 GB can go");
+        assert_eq!(old(true).text(), "All 230 old ticked");
         assert_eq!(Verdict::Clear { days: 7, listed: false }.text(), "\u{2713} All clear \u{00b7} nothing older than 7d");
         assert_eq!(Verdict::ByHand { count: 3, days: 7 }.text(), "3 old devices/toolchains \u{00b7} tick by hand");
         assert_eq!(Verdict::Measuring { measured: 1, total: 9 }.text(), "Measuring build artifacts\u{2026}");

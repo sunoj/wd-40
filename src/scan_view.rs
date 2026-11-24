@@ -1,8 +1,7 @@
 // Scan-results screen: grouped selectable targets and the clean CTA, or the
 // all-clear screen when nothing is old. One column in the popover; the same
-// column beside the usage map in the window.
-// Exports: `build`, `header_model`, `membership`, the screen's tags.
-// Deps: crate::{header, live, menu_rows, scan_calm, scan_rows, scan_verdict, state}.
+// column beside the usage map in the window. Exports: `build`, `header_model`,
+// `membership`, tags. Deps: crate::{header, live, menu_rows, scan_calm, scan_rows, scan_verdict}.
 
 use crate::group_scroll::{self, GROUP_CAP};
 use crate::header::{self, ScanHeader, SCAN_HEADER_HEIGHT};

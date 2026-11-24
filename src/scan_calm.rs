@@ -1,8 +1,7 @@
 // The scan screen when nothing is past the keep threshold: the can at rest on
 // clean steel, the verdict as a headline, the next target to turn old, and one
 // row that unfolds the recent builds into the ordinary list.
-// Exports: `LIST`, `CALM_H`, `calm`, `next_old`, `draw`.
-// Deps: crate::{can, crust, hover_row, names, selection, state, widgets}.
+// Exports: `LIST`, `CALM_H`, `calm`, `next_old`, `draw`. Deps: crate::{can, crust, hover_row, selection}.
 
 use crate::can::{can_view, REST};
 use crate::hover_row::hover_row;
@@ -17,7 +16,7 @@ use objc2_app_kit::{NSTextAlignment, NSView};
 use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize};
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime};
-use wd40::scanner::{ArtifactGroup, ArtifactKind, TargetDir};
+use wd40::scanner::{ArtifactGroup, TargetDir};
 
 /// Key in `AppState::open` for "show the list although all is clear".
 pub const LIST: &str = "list";
@@ -26,11 +25,12 @@ const PLATE_H: f64 = 112.0;
 const ROW_H: f64 = 40.0;
 
 /// True when the scan screen is the all-clear one: sizes are in, nothing
-/// listed is old, nothing is ticked, and the list has not been asked for.
+/// listed is old, nothing is ticked, and the list has not been asked for. It
+/// holds while a rescan is still finding targets: the last answer stands
+/// until there are new sizes to wait for.
 pub fn calm(state: &AppState) -> bool {
-    let settled = !state.sizing() && !crate::tasks::is_scanning();
     let listed = state.targets.len() - state.empty_targets().len();
-    settled
+    !state.sizing()
         && listed > 0
         && state.selected.is_empty()
         && !state.open.contains(LIST)
@@ -38,15 +38,14 @@ pub fn calm(state: &AppState) -> bool {
 }
 
 /// The listed target that crosses the keep threshold first, and in how many
-/// days (rounded up). Simulator devices and toolchains never join the old
-/// batch, so they are not what comes next.
+/// days (rounded up). It is the row test `nothing_old` uses, of every kind:
+/// the first target to turn old is the one that ends the all-clear screen.
 pub fn next_old(targets: &[TargetDir], empty: &HashSet<usize>, keep_days: u64) -> Option<(usize, u64)> {
     let limit = Duration::from_secs(keep_days.saturating_mul(86_400));
     let now = SystemTime::now();
     let left = |target: &TargetDir| limit.checked_sub(now.duration_since(target.last_modified).ok()?);
     (0..targets.len())
         .filter(|index| !empty.contains(index))
-        .filter(|index| !matches!(targets[*index].kind, ArtifactKind::Toolchain | ArtifactKind::Simulator))
         .filter_map(|index| Some((index, left(&targets[index])?)))
         .min_by_key(|(_, left)| *left)
         .map(|(index, left)| (index, left.as_secs().div_ceil(86_400).max(1)))
@@ -128,14 +127,15 @@ mod tests {
         TargetDir { path: "/w/a/target".into(), size_bytes: 1, last_modified, kind }
     }
 
-    /// The oldest recent target is next, in whole days rounded up; a device is
-    /// never next, and neither is a target that is old already or left out.
+    /// The oldest recent target is next, in whole days rounded up, whatever
+    /// its kind; a target that is old already, or left out, never is.
     #[test]
     fn the_next_target_to_turn_old_is_the_oldest_recent_one() {
         use ArtifactKind::{NodeModules, RustTarget, Simulator};
         let targets = [aged(RustTarget, 24), aged(NodeModules, 100), aged(Simulator, 160), aged(RustTarget, 400), aged(RustTarget, 150)];
-        assert_eq!(next_old(&targets, &HashSet::from([4]), 7), Some((1, 3)));
-        assert_eq!(next_old(&targets, &HashSet::new(), 7), Some((4, 1)));
-        assert_eq!(next_old(&targets[2..4], &HashSet::new(), 7), None);
+        assert_eq!(next_old(&targets, &HashSet::from([2]), 7), Some((4, 1)));
+        assert_eq!(next_old(&targets, &HashSet::from([2, 4]), 7), Some((1, 3)));
+        assert_eq!(next_old(&targets, &HashSet::new(), 7), Some((2, 1)));
+        assert_eq!(next_old(&targets[3..4], &HashSet::new(), 7), None);
     }
 }

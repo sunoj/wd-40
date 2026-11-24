@@ -110,7 +110,7 @@ When sizes are in, nothing listed is past the keep threshold
 (`selection::nothing_old`) and nothing is ticked, the list is replaced by a
 screen of its own (`src/scan_calm.rs`): the can at rest on clean steel, "All
 clear", the threshold, and the next target to turn old with the days until it
-does (`scan_calm::next_old`; never a simulator device or a toolchain). The
+does (`scan_calm::next_old`, the same per-row test, of every kind). The
 header has no verdict line and the footer has no clean button. One row,
 "N recent builds in M groups", unfolds the ordinary list for ticking a recent
 build by hand; "Hide list" on the verdict line puts it away. In the window the
@@ -118,7 +118,8 @@ left column is this screen and the map shows the recent targets as faint
 tiles.
 
 The screen gives way to the list as soon as the state no longer matches: a
-target ages past the threshold, a tile is ticked on the map, or a scan starts.
+target ages past the threshold, a tile is ticked on the map, or a rescan has
+new sizes to measure. While a rescan is still finding targets the screen stays.
 The live patches in `src/live.rs` refuse a tree built for the other screen, so
 the change is always a rebuild.
 

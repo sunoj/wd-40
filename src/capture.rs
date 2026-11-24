@@ -124,7 +124,7 @@ fn run_list(dir: &str, appearance: &str) {
     let calm = matches!(std::env::var("WD40_CROWD").as_deref(), Ok("real" | "clear"));
     match calm {
         true => run_on_main(|| on_main(|mtm| crate::actions::toggle_fold(usize::MAX, mtm))),
-        false => run_on_main(|| on_main(crate::actions::tick_old)),
+        false => run_on_main(press_tick_old),
     }
     shoot(if calm { "popover-listed" } else { "popover-ticked" });
     run_on_main(|| on_main(|mtm| {
@@ -136,6 +136,18 @@ fn run_list(dir: &str, appearance: &str) {
     std::thread::sleep(Duration::from_millis(700));
     shoot("window");
     run_on_main(|| on_main(|mtm| objc2_app_kit::NSApplication::sharedApplication(mtm).terminate(None)));
+}
+
+/// Press the verdict line's own "Tick them" button, as a click would.
+fn press_tick_old() {
+    let ticked = || crate::state::with_state_ret(|state| state.selected.len()).unwrap_or(0);
+    let button = crate::popover::content_view().and_then(|view| view.viewWithTag(crate::scan_verdict::TAG_TICK_OLD));
+    let before = ticked();
+    match button.and_then(|view| view.downcast::<objc2_app_kit::NSButton>().ok()) {
+        Some(button) => unsafe { button.performClick(None) },
+        None => return eprintln!("list: no tick-old button on show"),
+    }
+    eprintln!("list: pressed the tick-old button: ticked {before} -> {}", ticked());
 }
 
 pub fn on_main(body: fn(MainThreadMarker)) {
