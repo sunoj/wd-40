@@ -2,8 +2,9 @@
 // height inside the list, so one large group cannot swallow it. It scrolls
 // until it reaches an end and then hands the wheel to the list around it, and
 // it fades the edge that has more rows beyond it.
-// Exports: `GROUP_CAP`, `capped`, `forget`. Deps: crate::{theme, widgets}.
+// Exports: `GROUP_CAP`, `capped`, `forget`. Deps: crate::{hover_row, theme, widgets}.
 
+use crate::hover_row::HoverRow;
 use crate::layout::panel_w;
 use crate::theme::Theme;
 use crate::widgets::add_fill;
@@ -60,13 +61,24 @@ define_class!(
     pub struct GroupScroll;
 
     impl GroupScroll {
+        /// Overriding `scrollWheel:` costs a scroll view AppKit's responsive
+        /// scrolling, which tracks a trackpad gesture and its momentum off the
+        /// main thread; without it every event of a fling waits its turn there.
+        /// The override only decides who takes a gesture, so it keeps it.
+        #[unsafe(method(isCompatibleWithResponsiveScrolling))]
+        fn compatible() -> bool {
+            true
+        }
+
         /// Scroll the group while it has somewhere to go in that direction;
-        /// at an end, the wheel belongs to the list the group sits in.
+        /// at an end, the wheel belongs to the list the group sits in. With
+        /// responsive scrolling this sees the start of each trackpad gesture
+        /// (whoever takes it keeps it) and every event of a plain mouse wheel.
         #[unsafe(method(scrollWheel:))]
         fn scroll_wheel(&self, event: &NSEvent) {
             let delta = event.scrollingDeltaY();
             let (above, below) = self.room();
-            let spent = delta == 0.0 || (delta > 0.0 && above <= 0.5) || (delta < 0.0 && below <= 0.5);
+            let spent = (delta > 0.0 && above <= 0.5) || (delta < 0.0 && below <= 0.5);
             match (spent, unsafe { self.nextResponder() }) {
                 (true, Some(outer)) => outer.scrollWheel(event),
                 _ => unsafe { msg_send![super(self), scrollWheel: event] },
@@ -105,6 +117,21 @@ impl GroupScroll {
         self.ivars().top.setHidden(above <= 0.5);
         self.ivars().bottom.setHidden(below <= 0.5);
         OFFSETS.with(|cell| cell.borrow_mut().insert(self.ivars().key, above));
+        self.rehover();
+    }
+
+    /// Rows slide under a pointer that has not moved, and AppKit sends them
+    /// no enter or exit for it: light exactly the row the pointer is now over.
+    fn rehover(&self) {
+        let (Some(window), Some(document)) = (self.window(), self.documentView()) else { return };
+        let pointer = window.mouseLocationOutsideOfEventStream();
+        let visible = self.contentView().convertRect_toView(self.contentView().bounds(), None);
+        let inside = objc2_foundation::NSPointInRect(pointer, visible);
+        for view in document.subviews() {
+            let Ok(row) = view.downcast::<HoverRow>() else { continue };
+            let at = row.convertPoint_fromView(pointer, None);
+            row.paint_hover(inside && objc2_foundation::NSPointInRect(at, row.bounds()));
+        }
     }
 }
 
