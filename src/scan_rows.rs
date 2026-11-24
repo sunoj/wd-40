@@ -22,7 +22,7 @@ use objc2_app_kit::{NSBox, NSLineBreakMode, NSTextField, NSView};
 use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize, NSString};
 use wd40::scanner::{ArtifactGroup, TargetDir};
 
-pub const ROW_H: f64 = 40.0;
+pub const ROW_H: f64 = 34.0;
 pub const GROUP_H: f64 = 33.0;
 /// Shown in place of a figure that is not known yet.
 const UNKNOWN: &str = "\u{2026}";
@@ -56,6 +56,8 @@ pub struct GroupModel {
     /// Every target in the group has a settled size.
     pub settled: bool,
     pub selection: GroupSelection,
+    /// Nothing in the group is past the keep threshold.
+    pub clear: bool,
 }
 
 pub struct RowModel<'a> {
@@ -67,6 +69,8 @@ pub struct RowModel<'a> {
     pub max_size: u64,
     pub on: bool,
     pub max_age_days: u64,
+    /// Whether a recent row may carry the RECENT badge.
+    pub badge: bool,
 }
 
 /// A figure, or the mark that says there is not one yet.
@@ -122,15 +126,22 @@ pub fn draw_group_header(
         parent, model.selection, PAD_X, y + 6.0, sel!(handleToggleGroup:), target,
         crate::scan_view::TAG_GROUP_BASE + index as isize, theme, mtm,
     );
-    widgets::symbol_view(parent, model.group.symbol(), PAD_X + 23.0, y + 6.0, 15.0, theme.ink_3, mtm);
     // Boxes centre on y + 13.5; all-caps text carries descender space it never
     // uses, so its frame sits a point lower to land on the same optical line.
-    label_tracked(parent, title(model.group), PAD_X + 46.0, y + 4.0, 120.0, 17.0, 11.5, false, theme.ink_3, true, 0.69, mtm);
+    // The chip follows the title, however long the group's name is.
+    let name = title(model.group);
+    let title_w = widgets::fitted_width(name, 11.5, true, mtm) + name.len() as f64 * 0.69 + 4.0;
+    let chip_x = DETAIL_X + title_w + 6.0;
+    label_tracked(parent, name, DETAIL_X, y + 4.0, title_w, 17.0, 11.5, false, theme.ink_3, true, 0.69, mtm);
     // As wide as its figure: a fixed badge clipped a three-digit count to two.
     let count = model.count.to_string();
     let count_w = widgets::fitted_width(&count, 10.5, true, mtm);
-    widgets::add_fill(parent, PAD_X + 166.0, y + 5.0, count_w + 10.0, 17.0, theme.surface_2, 1.0, 4.0, mtm);
-    label(parent, &count, PAD_X + 171.0, y + 6.0, count_w + 2.0, 15.0, 10.5, false, theme.ink_3, true, mtm);
+    widgets::add_fill(parent, chip_x, y + 5.0, count_w + 10.0, 17.0, theme.surface_2, 1.0, 4.0, mtm);
+    label(parent, &count, chip_x + 5.0, y + 6.0, count_w + 2.0, 15.0, 10.5, false, theme.ink_3, true, mtm);
+    // A clear group says so here, in its own header, and nowhere else.
+    if model.clear {
+        label(parent, "\u{2713}", chip_x + 18.0 + count_w, y + 5.0, 16.0, 16.0, 12.5, true, theme.ok, false, mtm);
+    }
     let size = label_right(parent, "", PAD_X + 203.0, y + 4.0, content_w() - 203.0, 17.0, 12.0, theme.ink_2, true, mtm);
     show_group_size(&size, model.size, model.settled);
     (y, Group { group: model.group, size, check })
@@ -159,8 +170,8 @@ pub fn draw_row(
     let tag = crate::scan_view::TAG_ITEM_BASE + model.index as isize;
     let row = hover_row(parent, y, ROW_H, theme.surface_2, tag, mtm);
     let wash = draw_wash(&row, model, theme, mtm);
-    let check = checkbox(&row, GroupSelection::from(model.on), PAD_X, 13.0, sel!(handleToggleItem:), target, tag, theme, mtm);
-    let name = label(&row, model.name, DETAIL_X, 18.0, name_w(), 16.0, 13.5, false, theme.ink, false, mtm);
+    let check = checkbox(&row, GroupSelection::from(model.on), PAD_X, 9.5, sel!(handleToggleItem:), target, tag, theme, mtm);
+    let name = label(&row, model.name, DETAIL_X, 15.0, name_w(), 16.0, 13.5, false, theme.ink, false, mtm);
     // A device or project name can outrun the column; ending it in an ellipsis
     // says so, where a hard clip reads as a name that happens to look odd.
     name.setLineBreakMode(NSLineBreakMode::ByTruncatingTail);
@@ -168,7 +179,8 @@ pub fn draw_row(
     let age = draw_detail(&row, model, recent, theme, mtm);
     let badge = draw_recent_badge(&row, theme, mtm);
     badge.setHidden(!recent);
-    let size = label_right(&row, "", size_x(), 12.0, SIZE_W, 16.0, 13.0, theme.ink, true, mtm);
+    badge.setAlphaValue(if model.badge { 1.0 } else { 0.0 });
+    let size = label_right(&row, "", size_x(), 9.0, SIZE_W, 16.0, 13.0, theme.ink, true, mtm);
     show_size(&size, model.measured.then_some(model.target.size_bytes));
     // Its own action, so `HoverRow::hitTest` leaves the click with it: opening
     // Finder must not also tick the row it sits in.
@@ -192,9 +204,9 @@ fn draw_detail(
     let width = detail_width(recent);
     let rest = meta(model.target);
     let path = display_path(&model.target.path);
-    let field = label(row, &rest, DETAIL_X, 4.0, width, 14.0, 11.0, false, theme.ink_3, true, mtm);
+    let field = label(row, &rest, DETAIL_X, 2.0, width, 14.0, 11.0, false, theme.ink_3, true, mtm);
     field.setUsesSingleLineMode(true);
-    field.setLineBreakMode(NSLineBreakMode::ByTruncatingMiddle);
+    field.setLineBreakMode(NSLineBreakMode::ByTruncatingHead);
     row.set_detail(&field, &rest, &path);
     row.setToolTip(Some(&NSString::from_str(&model.target.path.to_string_lossy())));
     field
@@ -208,7 +220,10 @@ fn draw_wash(
 ) -> Retained<NSBox> {
     let bytes = if model.measured { model.target.size_bytes } else { 0 };
     let frame = wash_frame(bytes, model.max_size);
-    widgets::add_fill(row, frame.origin.x, frame.origin.y, frame.size.width, METER_H, theme.accent, 0.75, METER_H / 2.0, mtm)
+    // Kept for the live handle, not shown: under every row it read as noise.
+    let meter = widgets::add_fill(row, frame.origin.x, frame.origin.y, frame.size.width, METER_H, theme.accent, 0.75, METER_H / 2.0, mtm);
+    meter.setHidden(true);
+    meter
 }
 
 fn meta(target: &TargetDir) -> String {

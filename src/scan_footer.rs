@@ -15,21 +15,18 @@ use objc2_app_kit::NSView;
 use objc2_foundation::MainThreadMarker;
 use std::collections::HashSet;
 use wd40::disk::sum_bytes;
-use wd40::scanner::sizes_may_overlap;
 
 const TAG_TICK_OLD: isize = 2008;
 
 /// Button, shortcuts and padding. The caveat line adds its own height only
 /// when there is a caveat.
 const FOOTER_BASE_H: f64 = 95.0;
-const CAVEAT_H: f64 = 20.0;
 const RECEIPT_H: f64 = 20.0;
 const TICK_H: f64 = 24.0;
 
 pub fn footer_h(state: &AppState) -> f64 {
     FOOTER_BASE_H
         + if old_batch(state).0.is_empty() { 0.0 } else { TICK_H }
-        + if footer_caveat(state).is_some() { CAVEAT_H } else { 0.0 }
         + if crate::auto_clean::receipt_line().is_some() { RECEIPT_H } else { 0.0 }
 }
 pub fn draw_footer(
@@ -49,10 +46,6 @@ pub fn draw_footer(
     }
     if let Some(receipt) = crate::auto_clean::receipt_line() {
         label(parent, &receipt, PAD_X, line_y, content_w(), 16.0, 11.0, false, theme.ink_3, false, mtm);
-        line_y -= RECEIPT_H;
-    }
-    if let Some(caveat) = footer_caveat(state) {
-        label(parent, &caveat, PAD_X, line_y, content_w(), 16.0, 11.5, false, theme.ink_3, false, mtm);
     }
     let rescan = text_button_hint(parent, "Rescan", "\u{2318}R", PAD_X, 13.0, sel!(handleRescan:), target, crate::scan_view::TAG_RESCAN, theme.ink_2, theme.ink_4, mtm);
     set_cmd_key(&rescan, "r");
@@ -98,19 +91,10 @@ fn clean_cta(state: &AppState) -> CleanCta {
     if state.selected.is_empty() {
         let days = state.config.max_age_days;
         let clear = !state.targets.is_empty() && crate::selection::nothing_old(&state.targets, &state.empty_targets(), None, days);
-        return if clear { CleanCta::Clear { days } } else { CleanCta::Empty };
+        return if clear { CleanCta::Clear } else { CleanCta::Empty };
     }
     CleanCta::Ready {
         count: state.selected.len(),
         size: scan_size(state.selected_size()),
     }
-}
-
-/// The only thing the footer can say that the rows do not already show. Empty
-/// checkboxes, RECENT badges and a disabled button state the rest of it
-/// themselves; repeating them in prose was noise on every open.
-fn footer_caveat(state: &AppState) -> Option<String> {
-    let paths: Vec<_> = state.targets.iter().map(|t| t.path.clone()).collect();
-    sizes_may_overlap(&paths)
-        .then(|| "Sizes overlap where builds share APFS clones.".to_string())
 }

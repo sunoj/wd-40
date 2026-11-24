@@ -38,9 +38,6 @@ pub const TAG_GROUP_BASE: isize = 3000;
 pub const TAG_REVEAL_BASE: isize = 10_000;
 
 /// How many of its old targets a group shows in the popover before folding.
-/// The line that says a group has nothing old, and the banner for the list.
-const CLEAR_H: f64 = 24.0;
-const BANNER_H: f64 = 86.0;
 const ROWS_PER_GROUP: usize = 3;
 const MAX_HEIGHT: f64 = 680.0;
 
@@ -55,7 +52,7 @@ pub fn build(state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainThrea
 fn build_stacked(state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainThreadMarker) -> (Retained<NSView>, f64) {
     let empty = state.empty_targets();
     let plans = plan_groups(&state.targets, &empty, fold(state));
-    let list_h = measure_list(state, &plans);
+    let list_h = measure_list(&plans);
     let body_h = (MAX_HEIGHT - header::SCAN_HEADER_HEIGHT - footer_h(state)).min(list_h);
     let height = header::SCAN_HEADER_HEIGHT + body_h + footer_h(state);
     let root = widgets::root_view(panel_w(), height, theme, mtm);
@@ -75,7 +72,7 @@ fn build_wide(state: &AppState, theme: &Theme, target: &AnyObject, width: f64, h
     add_fill(&root, panel_w(), 0.0, 1.0, height, theme.line, 1.0, 0.0, mtm);
     let (header, footer) = draw_frame(&root, height, state, theme, target, mtm);
     let body_h = height - header::SCAN_HEADER_HEIGHT - footer_h(state);
-    let list_h = measure_list(state, &plans);
+    let list_h = measure_list(&plans);
     let list = crate::scrolling::scroll_document_view(&root, 0.0, footer_h(state), panel_w(), body_h, list_h, mtm);
     let (rows, groups) = draw_list(&list, state, &plans, list_h.max(body_h), theme, target, mtm);
     let frame = layout::map_frame(width, height);
@@ -120,6 +117,8 @@ pub fn header_model(state: &AppState) -> ScanHeader {
         measured: state.measured.len(),
         total: state.targets.len(),
         discovering: crate::tasks::is_discovering(),
+        all_recent: all_clear(state),
+        keep_days: state.config.max_age_days,
         approximate: !state.reclaim.as_ref().is_some_and(|found| found.covers(&state.targets)),
     }
 }
@@ -135,10 +134,6 @@ fn draw_list(
     mtm: MainThreadMarker,
 ) -> (Vec<Row>, Vec<Group>) {
     let list_bottom = 4.0;
-    if all_clear(state) {
-        draw_all_clear(root, y, state, theme, mtm);
-        y -= BANNER_H;
-    }
     let names = display_names(&state.targets);
     let empty = state.empty_targets();
     let max_size = state.measured.iter().filter_map(|i| state.targets.get(*i)).map(|t| t.size_bytes).max().unwrap_or(1).max(1);
@@ -152,23 +147,22 @@ fn draw_list(
             count: plan.count,
             size: plan.size,
             settled: state.group_settled(plan.group),
+            clear: group_clear(state, plan),
             selection: group_selection(&state.targets, &state.selected, plan.group, &empty),
         };
         let (next, group) = scan_rows::draw_group_header(root, y, &model, theme, target, mtm);
         y = next;
         groups.push(group);
-        if group_clear(state, plan) {
-            let line = format!("\u{2713} Nothing older than {}d", state.config.max_age_days);
-            label(root, &line, PAD_X + 46.0, y - 20.0, content_w() - 46.0, 16.0, 12.5, false, theme.ok, false, mtm);
-            y -= CLEAR_H;
-        }
         // A group past the cap gets a scroll view of its own to draw into.
+        let clear = group_clear(state, plan);
         let shown_h = rows_height(plan);
         let all_h = plan.rows.len() as f64 * ROW_H;
         let inner = (all_h > shown_h).then(|| group_scroll::capped(root, y, shown_h, all_h, plan.group.key(), theme, mtm));
         let mut row_y = if inner.is_some() { all_h } else { y };
         for row in &plan.rows {
-            let model = row_model(state, row, &names, max_size);
+            let mut model = row_model(state, row, &names, max_size);
+            // RECENT only tells rows apart where a group has old ones too.
+            model.badge = !clear;
             let (next, drawn) = scan_rows::draw_row(inner.as_deref().unwrap_or(root), row_y, &model, theme, target, mtm);
             row_y = next;
             rows.push(drawn);
@@ -199,6 +193,7 @@ fn row_model<'a>(
         max_size,
         on: state.selected.contains(&row.index),
         max_age_days: state.config.max_age_days,
+        badge: true,
     }
 }
 
@@ -247,15 +242,7 @@ fn group_clear(state: &AppState, plan: &GroupPlan<'_>) -> bool {
     nothing_old(&state.targets, &state.empty_targets(), Some(plan.group), state.config.max_age_days)
 }
 
-/// The whole list is healthy: said once, at its head, before the groups.
-fn draw_all_clear(root: &NSView, y: f64, state: &AppState, theme: &Theme, mtm: MainThreadMarker) {
-    let days = state.config.max_age_days;
-    widgets::add_fill(root, PAD_X, y - BANNER_H + 8.0, content_w(), BANNER_H - 14.0, theme.ok, 0.12, 8.0, mtm);
-    label(root, "\u{2713}  Nothing to clean", PAD_X + 14.0, y - 34.0, content_w() - 28.0, 20.0, 15.0, true, theme.ok, false, mtm);
-    let detail = format!("Everything here was touched in the last {days} days. Recent builds stay listed below.");
-    widgets::label_wrap(root, &detail, PAD_X + 14.0, y - BANNER_H + 14.0, content_w() - 28.0, 32.0, 11.5, theme.ink_2, mtm);
-}
-
+/// Nothing listed is past the keep threshold: the header says so, once.
 fn all_clear(state: &AppState) -> bool {
     !state.targets.is_empty() && !state.sizing() && nothing_old(&state.targets, &state.empty_targets(), None, state.config.max_age_days)
 }
@@ -265,13 +252,13 @@ fn rows_height(plan: &GroupPlan<'_>) -> f64 {
     plan.rows.len().min(GROUP_CAP) as f64 * ROW_H
 }
 
-fn measure_list(state: &AppState, plans: &[GroupPlan<'_>]) -> f64 {
+fn measure_list(plans: &[GroupPlan<'_>]) -> f64 {
     if plans.is_empty() {
         return 48.0;
     }
-    let mut h = 8.0 + if all_clear(state) { BANNER_H } else { 0.0 };
+    let mut h = 8.0;
     for plan in plans {
-        h += GROUP_H + rows_height(plan) + if group_clear(state, plan) { CLEAR_H } else { 0.0 };
+        h += GROUP_H + rows_height(plan);
         if plan.hidden() > 0 {
             h += 40.0;
         }

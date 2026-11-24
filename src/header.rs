@@ -97,6 +97,10 @@ pub struct ScanHeader {
     pub total: usize,
     pub discovering: bool,
     pub approximate: bool,
+    /// Nothing found is past the keep threshold: the figures are recent
+    /// builds, not something to reclaim, and the verdict is "all clear".
+    pub all_recent: bool,
+    pub keep_days: u64,
 }
 
 impl ScanHeader {
@@ -150,11 +154,12 @@ pub fn draw_scan_header(parent: &NSView, y_top: f64, model: &ScanHeader, theme: 
         crate::motion::reset_scan_gauge();
     }
     let reclaimable = if model.discovering { 0 } else { model.reclaimable.min(used) };
+    let tone = if model.all_recent { theme.ink_3 } else { theme.accent };
     crate::header_legend::draw_legend_row(
         parent,
         y_top - 86.0,
         [
-            ("Reclaimable", human_size(reclaimable), theme.accent),
+            (if model.all_recent { "Recent builds" } else { "Reclaimable" }, human_size(reclaimable), tone),
             ("In use", human_size(used.saturating_sub(reclaimable)), theme.ink_4),
             ("Free", human_size(disk.free_bytes), theme.pos),
         ],
@@ -191,7 +196,12 @@ fn draw_scan_detail(
     } else {
         format!("\u{2192} {bound}{} free after cleaning", scan_size(after))
     };
-    label(parent, &detail, PAD_X, y_top - 112.0, 230.0, 16.0, 11.5, false, theme.ink_3, true, mtm);
+    // The verdict, said once: with nothing old, the screen is all clear.
+    let (detail, ink) = match model.all_recent && !model.in_progress() {
+        true => (format!("\u{2713} All clear \u{00b7} nothing older than {}d", model.keep_days), theme.ok),
+        false => (detail, theme.ink_3),
+    };
+    label(parent, &detail, PAD_X, y_top - 112.0, 300.0, 16.0, 11.5, false, ink, true, mtm);
     if model.sizing() {
         let counted = format!("{} of {} measured", model.measured, model.total);
         label_right(parent, &counted, PAD_X + 230.0, y_top - 112.0, content_w() - 230.0, 16.0, 11.5, theme.ink_3, true, mtm);
@@ -224,7 +234,7 @@ fn draw_scan_gauge(
     let animation = crate::motion::scan_gauge_animation(
         target_w, model.sizing(), model.in_progress(), reclaim_landed,
     );
-    let artifact = add_fill(parent, PAD_X + used_w, y, animation.from, 11.0, theme.accent, 1.0, 0.0, mtm);
+    let artifact = add_fill(parent, PAD_X + used_w, y, animation.from, 11.0, if model.all_recent { theme.ink_3 } else { theme.accent }, 1.0, 0.0, mtm);
     crate::motion::glide_for_gauge(&artifact, PAD_X + used_w, y, animation.to, animation.duration);
     let marker = add_fill(parent, PAD_X + used_w + animation.from, y, 1.0, 11.0, theme.pos, 0.55, 0.0, mtm);
     crate::motion::glide_gauge_marker(&marker, PAD_X + used_w + animation.to, y, animation.duration);
@@ -266,6 +276,8 @@ mod tests {
             total,
             discovering,
             approximate,
+            all_recent: false,
+            keep_days: 7,
         }
     }
 

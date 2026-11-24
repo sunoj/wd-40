@@ -18,6 +18,8 @@
 - **A large group scrolls inside itself** (`src/group_scroll.rs`): past seven rows a group's rows sit in a scroll view of their own under the group header, with a fade at each edge that has more. At an end the wheel passes to the list around it. Each group's offset is kept across rebuilds.
 - **Healthy states** (`src/scan_view.rs`, `src/selection.rs`): a group with nothing older than the keep threshold says so in green, and when no group has anything old the list opens with "Nothing to clean" and the button reads "All clear". Recent targets stay listed and tickable.
 
+- **The scan screen says its verdict once** (`src/header.rs`, `src/scan_rows.rs`, `src/scan_view.rs`): with nothing past the keep threshold the header reads "All clear" and counts the space as recent builds, not reclaimable; a clear group carries a green check in its own header. The banner, the per-group line, the green button, the row underline, the group icons and the APFS footnote are gone. Rows are 34pt, RECENT shows only in groups that also have old targets, and paths keep their tail.
+
 ### Fixed
 - **`release.sh` stops before building when the Keychain's Sparkle key is not the one `Info.plist` trusts** (`scripts/check-sparkle-key.sh`): 0.7.0 was first published with an EdDSA signature from a different key, and every installed copy reported "The update is improperly signed". The appcast was re-signed with the trusted key; the archives did not change.
 
