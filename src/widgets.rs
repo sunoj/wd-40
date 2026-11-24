@@ -27,8 +27,7 @@ pub fn root_view(width: f64, height: f64, theme: &Theme, mtm: MainThreadMarker) 
     view
 }
 
-/// The can's label along a view's top edge: blue body, yellow band, red cap,
-/// in the can's own proportions. Drawn over whatever the view already holds.
+/// The can's label along a view's top edge, over whatever the view holds.
 pub fn label_stripe(view: &NSView, mtm: MainThreadMarker) {
     let NSSize { width, height } = view.frame().size;
     let mut x = 0.0;
