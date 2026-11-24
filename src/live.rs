@@ -81,6 +81,12 @@ pub fn lifts_left() -> f64 {
     CLEAN.with(|cell| cell.borrow().as_ref().map_or(0.0, |clean| clean.plate.seconds_left()))
 }
 
+/// The scan map on show, for the debug run that clicks it.
+#[cfg(debug_assertions)]
+pub fn scan_map() -> Option<Retained<crate::usage_map::MapView>> {
+    SCAN.with(|cell| cell.borrow().as_ref().and_then(|scan| scan.map.clone()))
+}
+
 /// The plate on show, for the debug run that samples its layers.
 #[cfg(debug_assertions)]
 pub fn clean_plate() -> Option<Retained<PlateView>> {

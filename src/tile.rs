@@ -30,6 +30,9 @@ pub struct Entry {
 pub struct Patch {
     pub rect: NSRect,
     pub members: Vec<usize>,
+    /// True when the tile also stands for something a clean will not remove,
+    /// so it can never be lifted whole.
+    pub held: bool,
     pub name: String,
     pub path: String,
     pub bytes: u64,
@@ -57,7 +60,7 @@ pub fn patches(entries: &[Entry], size: NSSize) -> Vec<Patch> {
                 1 => (first.name.clone(), first.path.clone()),
                 n => (format!("{n} smaller targets"), String::new()),
             };
-            Patch { rect: cell.rect, name, path, bytes: cell.bytes, tone: first.tone, members: cell.members }
+            Patch { rect: cell.rect, name, path, bytes: cell.bytes, tone: first.tone, members: cell.members, held: false }
         })
         .collect()
 }

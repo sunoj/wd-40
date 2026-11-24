@@ -105,11 +105,11 @@ fn map_patches(parts: &Parts, size: NSSize) -> Vec<Patch> {
     let items = &parts.progress.items;
     let mut laid = patches(&usage_map::entries(parts.state), size);
     for patch in laid.iter_mut() {
-        patch.members = patch
-            .members
-            .iter()
-            .filter_map(|target| items.iter().position(|item| item.index == *target))
-            .collect();
+        let slots: Vec<usize> =
+            patch.members.iter().filter_map(|target| items.iter().position(|item| item.index == *target)).collect();
+        // A shared tile with a target outside the job is never wholly removed.
+        patch.held = slots.len() < patch.members.len();
+        patch.members = slots;
     }
     laid
 }

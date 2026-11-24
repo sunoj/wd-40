@@ -104,6 +104,18 @@ impl MapView {
         }
     }
 
+    /// A point, in window coordinates, inside the first tile that stands for
+    /// one target, and the legend as it reads now: for the debug smoke run.
+    #[cfg(debug_assertions)]
+    pub fn probe(&self) -> (Option<objc2_foundation::NSPoint>, String) {
+        let single = self.ivars().patches.iter().find(|patch| patch.members.len() == 1);
+        let point = single.map(|patch| {
+            let (at, size) = (patch.rect.origin, patch.rect.size);
+            self.convertPoint_toView(objc2_foundation::NSPoint::new(at.x + size.width / 2.0, at.y + size.height / 2.0), None)
+        });
+        (point, self.ivars().legend.stringValue().to_string())
+    }
+
     fn hit(&self, event: &NSEvent) -> Option<usize> {
         let point = self.convertPoint_fromView(event.locationInWindow(), None);
         self.ivars().patches.iter().position(|patch| contains(patch.rect, point))
@@ -137,10 +149,13 @@ pub fn usage_map(
     dark: bool,
     mtm: MainThreadMarker,
 ) -> Retained<MapView> {
-    let laid = patches(&entries(state), frame.size);
-    let idle = match laid.is_empty() {
-        true => "Nothing found to map".to_string(),
-        false => format!(
+    // Areas mean nothing until every size is in; an even grid would say they did.
+    let measuring = state.sizing() || crate::tasks::is_scanning();
+    let laid = if measuring { Vec::new() } else { patches(&entries(state), frame.size) };
+    let idle = match (measuring, laid.is_empty()) {
+        (true, _) => "Measuring\u{2026} the map is drawn once every size is in".to_string(),
+        (_, true) => "Nothing found to map".to_string(),
+        _ => format!(
             "{} targets \u{00b7} {} \u{00b7} click a tile to tick it",
             state.targets.len(),
             scan_size(state.total_size()),

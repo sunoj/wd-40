@@ -285,7 +285,10 @@ pub fn on_reclaim_done(mtm: MainThreadMarker) {
         println!("Reclaimable {} on the device, {summed} summed", wd40::scanner::human_size(state.total_size()));
     });
     RECLAIM_LANDED.store(true, Ordering::Relaxed);
-    if !live::totals_changed(mtm) {
+    // Only the scan screen shows this figure. Rebuilding the cleaning screen
+    // for it would replace the plate in the middle of a lift.
+    let on_scan = with_state_ret(|state| state.screen == UiScreen::Scan).unwrap_or(false);
+    if on_scan && !live::totals_changed(mtm) {
         crate::surface::refresh(mtm);
     }
     crate::status::refresh(mtm);

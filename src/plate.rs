@@ -206,22 +206,25 @@ impl PlateView {
             format!("{alpha:.2}@{:.0},{:.0}", frame.origin.x, frame.origin.y)
         }).collect();
         let (_, can) = shown(&laid.can);
-        format!("can {:.0},{:.0} tiles [{}]", can.origin.x, can.origin.y, tiles.join(" "))
+        let lifted = laid.tiles.iter().filter(|tile| tile.state() == DONE).count();
+        format!("lifted={lifted} can {:.0},{:.0} tiles [{}]", can.origin.x, can.origin.y, tiles.join(" "))
     }
 }
 
 /// What a tile should show for the job as it really stands. A tile shared by
-/// the tail is gone only when every target in it is.
+/// the tail is gone only when every target in it is; one that also stands for
+/// a target outside the job goes faint when the job's part is done, and stays.
 fn patch_state(patch: &Patch, progress: &CleanProgress) -> u8 {
     let states: Vec<u8> = patch.members.iter().filter_map(|slot| progress.items.get(*slot)).map(|item| item_state(item.status)).collect();
-    match states.as_slice() {
+    let whole = match states.as_slice() {
         [] => IDLE,
         [one] => *one,
         all if all.iter().all(|state| *state == DONE) => DONE,
         all if all.iter().all(|state| *state == PENDING) => PENDING,
         all if all.iter().any(|state| *state == ACTIVE || *state == PENDING) => ACTIVE,
         all => *all.iter().find(|state| **state != DONE).unwrap_or(&DONE),
-    }
+    };
+    if patch.held && whole == DONE { IDLE } else { whole }
 }
 
 /// The plate in its settled pose for `progress`: built from the state alone,
@@ -251,4 +254,37 @@ pub fn plate_view(
     view.lay(progress, mtm);
     view.show_legend(progress);
     view
+}
+
+#[cfg(test)]
+mod tests {
+    use super::patch_state;
+    use crate::state::{CleanItem, CleanItemStatus, CleanProgress};
+    use crate::tile::Patch;
+    use crate::treemap::{ACTIVE, DONE, IDLE};
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+    fn patch(members: Vec<usize>, held: bool) -> Patch {
+        let rect = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(10.0, 10.0));
+        Patch { rect, members, held, name: String::new(), path: String::new(), bytes: 1, tone: (0.0, 0.0, 0.0) }
+    }
+
+    fn run(statuses: &[CleanItemStatus]) -> CleanProgress {
+        let items = statuses
+            .iter()
+            .enumerate()
+            .map(|(index, status)| CleanItem { index, name: String::new(), size_bytes: 1, freed_bytes: 0, status: *status })
+            .collect();
+        CleanProgress { items, ..Default::default() }
+    }
+
+    #[test]
+    fn a_shared_tile_lifts_only_when_everything_in_it_has_gone() {
+        use CleanItemStatus::{Done, Pending};
+        assert_eq!(patch_state(&patch(vec![0, 1], false), &run(&[Done, Pending])), ACTIVE);
+        assert_eq!(patch_state(&patch(vec![0, 1], false), &run(&[Done, Done])), DONE);
+        // One of its targets is not in the job at all: it stays on the plate.
+        assert_eq!(patch_state(&patch(vec![0, 1], true), &run(&[Done, Done])), IDLE);
+        assert_eq!(patch_state(&patch(vec![], false), &run(&[Done])), IDLE);
+    }
 }
