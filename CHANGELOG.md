@@ -10,6 +10,8 @@
 - **The cleaning plate plays each removal in turn** (`src/plate.rs`, `src/choreo.rs`, `src/tile.rs`): the steel is painted once, each target is a tile of its own, and when a target has really been removed the can crosses to its tile and the tile rises off the steel. Removals that land faster than that are queued and played one after another; the done screen waits for the last. There is no per-frame timer. The crust now covers the whole plate; the job's share of the volume is given in the line under it. Pointer spraying, the mist and the wipe mask are gone.
 - **Row size bars are a thin meter under each row** (`src/scan_rows.rs`) instead of a wash behind it, which stepped down the list and ran off its left edge.
 
+- **Done and settings fill the window** (`src/done_view.rs`, `src/settings_frame.rs`): done is the result column beside the map as the run left it; settings is a reading-width column on one surface. The done screen's rows are headed "size as scanned", and a note names both figures when they differ from the free space the volume gained.
+
 ### Fixed
 - **`release.sh` stops before building when the Keychain's Sparkle key is not the one `Info.plist` trusts** (`scripts/check-sparkle-key.sh`): 0.7.0 was first published with an EdDSA signature from a different key, and every installed copy reported "The update is improperly signed". The appcast was re-signed with the trusted key; the archives did not change.
 

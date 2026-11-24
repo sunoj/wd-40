@@ -7,6 +7,8 @@ mod auto_clean;
 mod autostart;
 mod cache_names;
 mod can;
+#[cfg(debug_assertions)]
+mod capture;
 mod checkbox;
 mod choreo;
 mod clean_list;
@@ -41,6 +43,7 @@ mod settings_roots;
 mod settings_row;
 mod settings_view;
 mod settings_chrome;
+mod settings_frame;
 #[cfg(debug_assertions)]
 mod smoke;
 mod startup;

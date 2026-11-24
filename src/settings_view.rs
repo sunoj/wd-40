@@ -3,10 +3,9 @@
 // Exports: `build`, disclosure state/actions, choice tag decoders, and row tags.
 // Deps: crate::{controls, header, scrolling, settings_row, state, theme, widgets}.
 
-use crate::layout::{content_w, panel_w};
+use crate::layout::content_w;
 use crate::controls::days_slider;
 use crate::header::scan_size;
-use crate::settings_chrome::{draw_brand, draw_footer, BRAND_H, FOOTER_H};
 use crate::settings_row::{
     choice_list_height, disclosure_row, divider, group_row, section, switch_row, value_row,
     ChoiceSpec, GroupSpec, Spec,
@@ -14,13 +13,13 @@ use crate::settings_row::{
 use crate::state::AppState;
 use crate::theme::Theme;
 use crate::widgets::{
-    self, label, label_right, PAD_X,
+    label, label_right, PAD_X,
 };
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::sel;
 use objc2_app_kit::NSView;
-use objc2_foundation::{MainThreadMarker, NSPoint};
+use objc2_foundation::MainThreadMarker;
 use std::cell::Cell;
 use wd40::scanner::ArtifactGroup;
 
@@ -30,10 +29,6 @@ pub const TAG_ROOT_BASE: isize = 2300;
 pub(crate) const TAG_INTERVAL_BASE: isize = 2400;
 pub(crate) const TAG_DEPTH_BASE: isize = 2500;
 
-const MAX_HEIGHT: f64 = 540.0;
-/// Room for every section at once. What the body actually uses is measured off
-/// the drawing rather than predicted by a second copy of the layout.
-const SHEET_H: f64 = 1400.0;
 
 const INTERVALS: [(u64, &str); 5] = [(0, "Off"), (1, "1h"), (6, "6h"), (12, "12h"), (24, "1d")];
 const DEPTHS: [(usize, &str); 4] = [(4, "4 levels"), (6, "6 levels"), (8, "8 levels"), (10, "10 levels")];
@@ -51,25 +46,13 @@ pub fn build(
     target: &AnyObject,
     mtm: MainThreadMarker,
 ) -> (Retained<NSView>, f64) {
-    let sheet = widgets::sheet_view(panel_w(), SHEET_H, theme, mtm);
-    let used = SHEET_H - draw_body(&sheet, SHEET_H, state, theme, target, mtm);
-
-    let body_limit = MAX_HEIGHT - BRAND_H - FOOTER_H + disclosure_height();
-    let body_h = used.min(body_limit);
-    let height = BRAND_H + body_h + FOOTER_H;
-    let root = widgets::root_view(panel_w(), height, theme, mtm);
-    draw_brand(&root, height, theme, mtm);
-    let document =
-        crate::scrolling::scroll_document_view(&root, 0.0, FOOTER_H, panel_w(), body_h, used, mtm);
-    // The sheet is taller than what it drew, so hang it from the document's top
-    // edge and let the empty tail fall below the scroller.
-    sheet.setFrameOrigin(NSPoint::new(0.0, document.frame().size.height - SHEET_H));
-    document.addSubview(&sheet);
-    draw_footer(&root, theme, target, mtm);
-    (root, height)
+    match crate::layout::window_size() {
+        Some((width, height)) => (crate::settings_frame::build_wide(state, theme, target, width, height, mtm), height),
+        None => crate::settings_frame::build_column(state, theme, target, None, mtm),
+    }
 }
 
-fn draw_body(
+pub(crate) fn draw_body(
     sheet: &NSView,
     mut y: f64,
     state: &AppState,
@@ -261,7 +244,7 @@ pub fn depth_for_tag(tag: isize) -> Option<usize> {
 
 fn open_disclosure() -> Option<SettingsDisclosure> { OPEN_DISCLOSURE.get() }
 
-fn disclosure_height() -> f64 {
+pub(crate) fn disclosure_height() -> f64 {
     match open_disclosure() {
         Some(SettingsDisclosure::AutoClean) => choice_list_height(INTERVALS.len()),
         Some(SettingsDisclosure::ScanDepth) => choice_list_height(DEPTHS.len()),

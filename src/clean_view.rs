@@ -1,7 +1,7 @@
 // Cleaning-progress screen: disk header, job progress, and the plate that lifts
 // a tile as each target is really removed. Stacked in the popover; in the
 // window the figures and a line per target form a column beside the scan map.
-// Exports: `build`, `TAG_STOP`, and the zone painters `live` calls each tick.
+// Exports: `build`, `end_plate`, `TAG_STOP`, and the zone painters `live` calls each tick.
 // Deps: crate::{clean_list, controls, crust, header, layout, live, pace, plate, tile, usage_map}.
 
 use crate::controls::filled_button;
@@ -76,11 +76,22 @@ fn build_wide(parts: &Parts, width: f64, height: f64) -> Retained<NSView> {
     let (caption, path) = draw_path(&root, below, parts);
     let footer = draw_footer_zone(&root, parts);
     let list = clean_list::build(&root, FOOTER_H, below - PATH_H, parts.progress, theme, mtm);
-    let frame = layout::map_frame(width, height);
-    usage_map::draw_key(&root, parts.state, frame, theme, mtm);
-    let plate = draw_plate(&root, frame, map_patches(parts, frame.size), parts);
+    let plate = map_plate(&root, layout::map_frame(width, height), parts);
     live::install_clean(Clean { theme: *theme, header, strip, footer, caption, path, plate, list: Some(list) });
     root
+}
+
+/// The scan map as a plate, under its colour key, in the settled pose for the
+/// run as it stands.
+fn map_plate(root: &NSView, frame: NSRect, parts: &Parts) -> Retained<PlateView> {
+    usage_map::draw_key(root, parts.state, frame, parts.theme, parts.mtm);
+    draw_plate(root, frame, map_patches(parts, frame.size), parts)
+}
+
+/// The same plate for a run that is over: the done screen's picture of how it
+/// ended, with the cleared footprints in the steel and the rest still in place.
+pub fn end_plate(root: &NSView, frame: NSRect, state: &AppState, run: &CleanProgress, theme: &Theme, target: &AnyObject, mtm: MainThreadMarker) {
+    map_plate(root, frame, &Parts { state, progress: run, theme, target, mtm });
 }
 
 /// The job's items as map entries, each in its target's group colour.
@@ -132,14 +143,7 @@ fn draw_footer_zone(root: &NSView, parts: &Parts) -> Zone {
     footer
 }
 
-pub fn draw_disk_header(
-    root: &NSView,
-    y_top: f64,
-    state: &AppState,
-    p: &CleanProgress,
-    theme: &Theme,
-    mtm: MainThreadMarker,
-) {
+pub fn draw_disk_header(root: &NSView, y_top: f64, state: &AppState, p: &CleanProgress, theme: &Theme, mtm: MainThreadMarker) {
     header::draw_header(
         root,
         y_top,
@@ -241,13 +245,7 @@ pub fn show_path(caption: &NSTextField, field: &NSTextField, p: &CleanProgress) 
     field.setStringValue(&NSString::from_str(&text));
 }
 
-pub fn draw_footer(
-    root: &NSView,
-    p: &CleanProgress,
-    theme: &Theme,
-    target: &AnyObject,
-    mtm: MainThreadMarker,
-) {
+pub fn draw_footer(root: &NSView, p: &CleanProgress, theme: &Theme, target: &AnyObject, mtm: MainThreadMarker) {
     // Once the last target has settled there is nothing left to stop, and a
     // Stop button would say there was. The screen is only still up because it
     // is being shown, so the button offers the way out of it.

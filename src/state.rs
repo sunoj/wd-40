@@ -120,6 +120,8 @@ pub(crate) struct AppState {
     pub screen: UiScreen,
     pub cleaning: Option<CleanProgress>,
     pub done: Option<DoneSummary>,
+    /// How the last clean ended, item by item: what the done screen's map shows.
+    pub last_run: Option<CleanProgress>,
     pub status_item: Retained<NSStatusItem>,
     pub updater: Option<Updater>,
     /// Device-byte accounting for the targets that can share blocks, once it

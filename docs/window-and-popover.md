@@ -63,7 +63,21 @@ its bytes and coloured by its group.
   status. The plate is the scan map itself, in the same frame with the same
   tiles (`layout::map_frame`, `treemap::cells`), so the picture does not jump
   when a clean starts. Targets outside the job stay faint and never move.
-- Done and settings are the popover's column, centred as a card.
+- Done: the column is the result (free space gained, the disk before and
+  after, what was removed per group); the map shows how the run ended, with
+  the cleared footprints scribed in the steel and untouched tiles in place.
+- Settings: one surface edge to edge, with the settings in a 560pt reading
+  column down the middle. No screen is a popover-sized card in the window.
+
+## The two figures on the done screen
+
+The headline is the volume's own free space, read with `statfs` before and
+after the run. A row is the size the scan measured for the directories that
+were removed. They differ when a directory shares blocks with APFS clones of
+it (see `apfs-clone-overcount.md`): removing one copy does not return shared
+blocks. Free space also moves with whatever else is written during the run.
+The rows are headed "size as scanned", and when the two differ by more than
+5% a note under the rows names both figures.
 
 ## Cleaning animation and the done screen
 

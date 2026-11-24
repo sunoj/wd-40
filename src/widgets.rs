@@ -23,13 +23,19 @@ pub const STRIPE_H: f64 = 3.0;
 /// same every time, in the popover and in the window.
 pub fn root_view(width: f64, height: f64, theme: &Theme, mtm: MainThreadMarker) -> Retained<NSView> {
     let view = sheet_view(width, height, theme, mtm);
-    // Blue body, yellow band, red cap, in the can's own proportions.
+    label_stripe(&view, mtm);
+    view
+}
+
+/// The can's label along a view's top edge: blue body, yellow band, red cap,
+/// in the can's own proportions. Drawn over whatever the view already holds.
+pub fn label_stripe(view: &NSView, mtm: MainThreadMarker) {
+    let NSSize { width, height } = view.frame().size;
     let mut x = 0.0;
     for (colour, share) in [(CAN_BLUE, 0.62), (CAN_YELLOW, 0.26), (CAN_RED, 0.12)] {
-        add_fill(&view, x, height - STRIPE_H, width * share, STRIPE_H, hex(colour), 1.0, 0.0, mtm);
+        add_fill(view, x, height - STRIPE_H, width * share, STRIPE_H, hex(colour), 1.0, 0.0, mtm);
         x += width * share;
     }
-    view
 }
 
 /// The same surface without the label: content that scrolls inside a screen.

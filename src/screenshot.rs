@@ -32,7 +32,7 @@ const FIXTURE: [(&str, ArtifactKind, u64, u64); 10] = [
 ];
 /// The three points of a run the cleaning screen is captured at: how many of
 /// the job's targets have really gone by then.
-const CLEAN_FRAMES: [(&str, usize); 3] = [("start", 0), ("mid", 3), ("end", 7)];
+pub const CLEAN_FRAMES: [(&str, usize); 3] = [("start", 0), ("mid", 3), ("end", 7)];
 
 pub fn enabled() -> bool {
     std::env::var_os("WD40_SCREENSHOT_DIR").is_some()
@@ -44,7 +44,10 @@ pub fn maybe_start(_mtm: MainThreadMarker) {
     }
     std::thread::spawn(|| {
         std::thread::sleep(Duration::from_millis(400));
-        crate::mainthread::run_on_main(sequence);
+        match std::env::var_os("WD40_CAPTURE_WINDOW") {
+            Some(_) => crate::capture::run(),
+            None => crate::mainthread::run_on_main(sequence),
+        }
     });
 }
 
@@ -92,7 +95,7 @@ fn show_screen(screen: UiScreen, mtm: MainThreadMarker) {
 }
 
 /// Replace whatever the scan found with the fixture, settled and sorted.
-fn stage_fixture() {
+pub fn stage_fixture() {
     let now = SystemTime::now();
     with_state(|state| {
         state.targets = FIXTURE
@@ -116,7 +119,7 @@ fn stage_fixture() {
 
 /// A run over the eight largest targets with the first `gone` really removed
 /// and the next one coming off.
-fn stage_cleaning(gone: usize) {
+pub fn stage_cleaning(gone: usize) {
     with_state(|state| {
         let names = display_names(&state.targets);
         let items: Vec<CleanItem> = state
@@ -148,7 +151,7 @@ fn stage_cleaning(gone: usize) {
 
 /// The done summary for that same run finishing: every group's share of the
 /// eight removed, and the two smallest targets left in place.
-fn stage_done() {
+pub fn stage_done() {
     with_state(|state| {
         let (taken, left) = state.targets.split_at(state.targets.len().min(8));
         let removed: Vec<GroupSummary> = ArtifactGroup::ALL
@@ -176,6 +179,9 @@ fn stage_done() {
             troubled_count: 0,
         });
     });
+    // The run those figures describe: all eight really gone.
+    stage_cleaning(8);
+    with_state(|state| state.last_run = state.cleaning.take());
 }
 
 fn save(path: &Path, mtm: MainThreadMarker) {

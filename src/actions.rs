@@ -28,6 +28,7 @@ pub fn done_ack(mtm: MainThreadMarker) {
     with_state(|state| {
         state.screen = UiScreen::Scan;
         state.done = None;
+        state.last_run = None;
     });
     crate::surface::refresh(mtm);
     tasks::start_scan();

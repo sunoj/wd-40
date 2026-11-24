@@ -413,7 +413,7 @@ pub fn show_result(mtm: MainThreadMarker) {
     *PROGRESS.lock().unwrap() = None;
     *CLEAN_SHOWN.lock().unwrap() = None;
     with_state(|state| {
-        state.cleaning = None;
+        state.last_run = state.cleaning.take();
         state.done = summary;
         state.screen = UiScreen::Done;
     });

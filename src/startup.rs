@@ -32,6 +32,7 @@ pub(crate) fn run() {
         screen: UiScreen::Scan,
         cleaning: None,
         done: None,
+        last_run: None,
         status_item,
         updater: Updater::start(),
         reclaim: None,
