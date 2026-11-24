@@ -116,7 +116,8 @@ pub(crate) struct AppState {
     /// no figure yet and must never be drawn as though it had one.
     pub measured: HashSet<usize>,
     pub selected: HashSet<usize>,
-    pub show_all: bool,
+    /// What the user has unfolded: group keys, and `scan_calm::LIST`.
+    pub open: HashSet<&'static str>,
     pub screen: UiScreen,
     pub cleaning: Option<CleanProgress>,
     pub done: Option<DoneSummary>,
@@ -243,7 +244,7 @@ impl AppState {
 
     pub fn reset_selection(&mut self) {
         self.selected = default_selection(&self.targets, self.config.max_age_days);
-        self.show_all = false;
+        self.open.clear();
     }
 
     pub fn toggle_selected(&mut self, index: usize) {

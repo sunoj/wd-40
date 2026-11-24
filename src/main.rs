@@ -36,8 +36,10 @@ mod pace;
 mod plate;
 mod popover;
 mod reveal;
+mod scan_calm;
 mod scan_footer;
 mod scan_rows;
+mod scan_verdict;
 mod scrolling;
 mod scan_view;
 #[cfg(debug_assertions)]
@@ -68,7 +70,6 @@ mod widgets;
 mod window;
 mod zone;
 
-use state::with_state_ret;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{define_class, msg_send, MainThreadOnly};
@@ -107,18 +108,7 @@ define_class!(
 
         #[unsafe(method(handleToggleGroup:))]
         fn handle_toggle_group(&self, sender: &NSButton) {
-            let index = (sender.tag() - scan_view::TAG_GROUP_BASE) as usize;
-            let Some(&group) = wd40::scanner::ArtifactGroup::ALL.get(index) else { return };
-            let intent = with_state_ret(|state| {
-                let was_empty = state.selected.is_empty();
-                let empty = state.empty_targets();
-                selection::toggle_group(&state.targets, &mut state.selected, group, &empty);
-                (was_empty, state.selected.is_empty())
-            }).unwrap_or((false, true));
-            tasks::reclaim_for_selection_intent(intent.0, intent.1);
-            if !live::selection_changed(self.mtm()) {
-                surface::refresh(self.mtm());
-            }
+            actions::toggle_group(sender.tag(), self.mtm());
         }
 
         #[unsafe(method(handleTickOld:))]
@@ -157,9 +147,9 @@ define_class!(
             actions::done_ack(self.mtm());
         }
 
-        #[unsafe(method(handleShowMore:))]
-        fn handle_show_more(&self, _sender: &AnyObject) {
-            actions::show_more(self.mtm());
+        #[unsafe(method(handleToggleList:))]
+        fn handle_toggle_list(&self, _sender: &AnyObject) {
+            actions::toggle_fold(usize::MAX, self.mtm());
         }
 
         #[unsafe(method(handleRescan:))]

@@ -28,7 +28,7 @@ pub(crate) fn run() {
         targets: Vec::new(),
         measured: Default::default(),
         selected: Default::default(),
-        show_all: false,
+        open: Default::default(),
         screen: UiScreen::Scan,
         cleaning: None,
         done: None,

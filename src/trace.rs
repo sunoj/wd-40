@@ -180,7 +180,7 @@ fn run_bench() {
         let _ = live::chrome_changed(mtm);
     });
 
-    with_state(|state| state.show_all = true);
+    with_state(|state| state.open.extend(wd40::scanner::ArtifactGroup::ALL.iter().map(|group| group.key())));
     let refresh_all_us = time_repeat("refresh-show-all", 4, || {
         crate::surface::refresh(mtm);
     });

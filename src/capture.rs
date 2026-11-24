@@ -92,8 +92,19 @@ const CROWD: [(ArtifactKind, u64, u64); 6] = [
     (ArtifactKind::Toolchain, 0, 3),
 ];
 
-/// The scan list with the crowd in it: the popover, the popover with the old
-/// batch ticked, then the window.
+/// The user's own machine, by count: every target recent. WD40_CROWD=real.
+const REAL: [(ArtifactKind, u64, u64); 6] = [
+    (ArtifactKind::RustTarget, 0, 4),
+    (ArtifactKind::NodeModules, 0, 4),
+    (ArtifactKind::BuildOutput, 0, 127),
+    (ArtifactKind::Cache, 0, 16),
+    (ArtifactKind::Simulator, 0, 61),
+    (ArtifactKind::Toolchain, 0, 0),
+];
+
+/// The scan list with the crowd in it: the popover, then the popover with the
+/// old batch ticked (or, when all is clear, with the list unfolded), then the
+/// window.
 fn run_list(dir: &str, appearance: &str) {
     let shoot = |name: &str| {
         std::thread::sleep(Duration::from_millis(500));
@@ -110,9 +121,14 @@ fn run_list(dir: &str, appearance: &str) {
         note_window(crate::popover::content_view());
     }));
     shoot("popover");
-    run_on_main(|| on_main(crate::actions::tick_old));
-    shoot("popover-ticked");
+    let calm = matches!(std::env::var("WD40_CROWD").as_deref(), Ok("real" | "clear"));
+    match calm {
+        true => run_on_main(|| on_main(|mtm| crate::actions::toggle_fold(usize::MAX, mtm))),
+        false => run_on_main(|| on_main(crate::actions::tick_old)),
+    }
+    shoot(if calm { "popover-listed" } else { "popover-ticked" });
     run_on_main(|| on_main(|mtm| {
+        with_state(|state| state.open.clear());
         window::open(mtm);
         note_window(window::content_view(mtm));
     }));
@@ -137,7 +153,8 @@ pub fn stage_crowd() {
     let now = std::time::SystemTime::now();
     with_state(|state| {
         state.targets.clear();
-        for (kind, old, recent) in CROWD {
+        let real = std::env::var("WD40_CROWD").as_deref() == Ok("real");
+        for (kind, old, recent) in if real { REAL } else { CROWD } {
             for n in 0..old + recent {
                 // WD40_CROWD=clear makes every target recent; =mix, every other group.
                 let young = match std::env::var("WD40_CROWD").as_deref() {
@@ -158,7 +175,7 @@ pub fn stage_crowd() {
         state.reclaim = None;
         state.finish_sizing();
         state.selected.clear();
-        state.show_all = false;
+        state.open.clear();
         state.screen = UiScreen::Scan;
     });
 }

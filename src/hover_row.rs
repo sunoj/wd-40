@@ -1,7 +1,7 @@
 // Row container: tints itself while the pointer is inside it, says which
-// directory it stands for while the pointer stays, and treats the whole row as
-// the hit target rather than just the 15pt tick box.
-// Exports: `HoverRow`, `hover_row`, `fit_detail`.
+// directory it stands for and shows its reveal control while the pointer
+// stays, and treats the whole row as the hit target rather than a 15pt box.
+// Exports: `HoverRow`, `hover_row`.
 // Deps: objc2 AppKit tracking APIs; crate::{actions, theme, widgets}.
 
 use crate::layout::{panel_w};
@@ -29,6 +29,8 @@ pub struct HoverRowIvars {
     tag: Cell<isize>,
     /// Set once the row's labels exist, which is after the row itself does.
     detail: RefCell<Option<Detail>>,
+    /// A control that is only on show while the pointer is in the row.
+    extra: RefCell<Option<Retained<NSView>>>,
 }
 
 define_class!(
@@ -52,10 +54,11 @@ define_class!(
         }
 
         /// A 15pt box is a small thing to ask someone to hit for an
-        /// irreversible choice; the whole row carries it.
+        /// irreversible choice; the whole row carries it. The tag says which
+        /// kind of row this is: a target to tick, or a header to unfold.
         #[unsafe(method(mouseDown:))]
         fn mouse_down(&self, _event: &NSEvent) {
-            crate::actions::toggle_item(self.ivars().tag.get(), self.mtm());
+            crate::actions::row_clicked(self.ivars().tag.get(), self.mtm());
         }
 
         /// Anything in the row with an action of its own keeps the click, so the
@@ -106,38 +109,26 @@ impl HoverRow {
         detail.hover.setHidden(!hovering);
     }
 
+    /// Which row this is, for the debug run that clicks headers.
+    #[cfg(debug_assertions)]
+    pub fn tag(&self) -> isize {
+        self.ivars().tag.get()
+    }
+
+    /// Keep `view` out of sight until the pointer is in the row.
+    pub fn show_on_hover(&self, view: &NSView) {
+        view.setHidden(true);
+        *self.ivars().extra.borrow_mut() = Some(view.retain());
+    }
+
     pub(crate) fn paint_hover(&self, hovering: bool) {
         self.ivars().tint.setHidden(!hovering);
         self.show_path(hovering);
-    }
-
-    fn fit_detail(&self, width: f64) {
-        let detail = self.ivars().detail.borrow();
-        let Some(detail) = detail.as_ref() else { return };
-        set_width(&detail.rest, width);
-        set_width(&detail.hover, width);
-    }
-}
-
-/// The age line shares its width with the hover path. A reopen that shows or
-/// hides RECENT has to move both, or the path sits under the badge.
-pub fn fit_detail(age: &NSTextField, width: f64) {
-    if let Some(parent) = unsafe { age.superview() } {
-        if let Some(row) = parent.downcast_ref::<HoverRow>() {
-            row.fit_detail(width);
-            return;
+        if let Some(extra) = self.ivars().extra.borrow().as_ref() {
+            extra.setHidden(!hovering);
         }
     }
-    set_width(age, width);
-}
 
-fn set_width(field: &NSTextField, width: f64) {
-    let mut frame = field.frame();
-    if (frame.size.width - width).abs() < 0.5 {
-        return;
-    }
-    frame.size.width = width;
-    field.setFrame(frame);
 }
 
 fn twin_label(src: &NSTextField, text: &str) -> Retained<NSTextField> {
@@ -182,6 +173,7 @@ pub fn hover_row(
         tint: make_tint(width, height, color, mtm),
         tag: Cell::new(tag),
         detail: RefCell::new(None),
+        extra: RefCell::new(None),
     });
     let row: Retained<HoverRow> = unsafe { msg_send![super(row), initWithFrame: frame] };
     // Isolates the tint show/hide from the scroll view's backing store.

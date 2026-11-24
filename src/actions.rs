@@ -9,6 +9,30 @@ use objc2_app_kit::{NSAlert, NSAlertStyle, NSApplication, NSButton};
 use objc2_foundation::{MainThreadMarker, NSString};
 use wd40::scanner::ArtifactGroup;
 
+/// A click anywhere on a list row. Header rows carry a fold tag; every other
+/// row is a target, and a click ticks it.
+pub fn row_clicked(tag: isize, mtm: MainThreadMarker) {
+    match usize::try_from(tag - crate::scan_view::TAG_FOLD_BASE) {
+        Ok(index) => toggle_fold(index, mtm),
+        Err(_) => toggle_item(tag, mtm),
+    }
+}
+
+/// Fold or unfold one group, or (past the last group) the all-clear screen's
+/// list. The outer list keeps its place; only this group's rows come or go.
+pub fn toggle_fold(index: usize, mtm: MainThreadMarker) {
+    let key = ArtifactGroup::ALL.get(index).map_or(crate::scan_calm::LIST, |group| group.key());
+    with_state(|state| {
+        if !state.open.remove(key) {
+            state.open.insert(key);
+        }
+    });
+    if key == crate::scan_calm::LIST {
+        crate::scrolling::reset_scroll();
+    }
+    crate::surface::refresh(mtm);
+}
+
 pub fn toggle_item(tag: isize, mtm: MainThreadMarker) {
     let index = (tag - crate::scan_view::TAG_ITEM_BASE) as usize;
     // Ticking a row is the smallest state change the app has; it repaints the
@@ -16,6 +40,22 @@ pub fn toggle_item(tag: isize, mtm: MainThreadMarker) {
     let intent = with_state_ret(|state| {
         let was_empty = state.selected.is_empty();
         state.toggle_selected(index);
+        (was_empty, state.selected.is_empty())
+    }).unwrap_or((false, true));
+    tasks::reclaim_for_selection_intent(intent.0, intent.1);
+    if !crate::live::selection_changed(mtm) {
+        crate::surface::refresh(mtm);
+    }
+}
+
+/// Tick or untick every listed target of the group whose header box this is.
+pub fn toggle_group(tag: isize, mtm: MainThreadMarker) {
+    let index = (tag - crate::scan_view::TAG_GROUP_BASE) as usize;
+    let Some(&group) = ArtifactGroup::ALL.get(index) else { return };
+    let intent = with_state_ret(|state| {
+        let was_empty = state.selected.is_empty();
+        let empty = state.empty_targets();
+        crate::selection::toggle_group(&state.targets, &mut state.selected, group, &empty);
         (was_empty, state.selected.is_empty())
     }).unwrap_or((false, true));
     tasks::reclaim_for_selection_intent(intent.0, intent.1);
@@ -47,11 +87,6 @@ pub fn done_ack(mtm: MainThreadMarker) {
     });
     crate::surface::refresh(mtm);
     tasks::start_scan();
-}
-
-pub fn show_more(mtm: MainThreadMarker) {
-    with_state(|state| state.show_all = true);
-    crate::surface::refresh(mtm);
 }
 
 /// Both settings screens scroll, and they do not share a place in a list, so a

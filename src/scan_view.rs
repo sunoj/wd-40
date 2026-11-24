@@ -1,45 +1,47 @@
-// Scan-results screen: grouped selectable targets and the clean CTA. One column
-// in the popover; the same column beside the usage map in the window.
+// Scan-results screen: grouped selectable targets and the clean CTA, or the
+// all-clear screen when nothing is old. One column in the popover; the same
+// column beside the usage map in the window.
 // Exports: `build`, `header_model`, `membership`, the screen's tags.
-// Deps: crate::{controls, header, live, menu_rows, scan_rows, state, widgets}.
+// Deps: crate::{header, live, menu_rows, scan_calm, scan_rows, scan_verdict, state}.
 
-use crate::layout::{self, content_w, panel_w};
-use crate::usage_map;
-use crate::controls::text_button_underlined;
-use crate::scan_footer::{draw_footer, footer_h};
-use crate::header::{self, scan_size, ScanHeader};
-use crate::live::{self, Group, Row, Scan};
-use crate::zone::Zone;
 use crate::group_scroll::{self, GROUP_CAP};
-use crate::selection::nothing_old;
+use crate::header::{self, ScanHeader, SCAN_HEADER_HEIGHT};
+use crate::layout::{self, content_w, panel_w};
+use crate::live::{self, Group, Row, Scan};
 use crate::menu_rows::{plan_groups, Fold, GroupPlan};
 use crate::names::display_names;
+use crate::scan_calm::{calm, CALM_H};
+use crate::scan_footer::{draw_footer, footer_h};
 use crate::scan_rows::{self, GroupModel, RowModel, GROUP_H, ROW_H};
-use crate::selection::group_selection;
+use crate::scan_verdict::{self, VERDICT_H};
+use crate::selection::{group_selection, nothing_old};
 use crate::state::AppState;
 use crate::theme::Theme;
-use crate::widgets::{
-    self, add_fill, add_line, label, PAD_X,
-};
+use crate::usage_map;
+use crate::widgets::{self, add_fill, add_line, label, PAD_X};
+use crate::zone::Zone;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
-use objc2::sel;
 use objc2_app_kit::NSView;
 use objc2_foundation::MainThreadMarker;
+use wd40::scanner::ArtifactGroup;
 
 pub const TAG_CLEAN: isize = 2000;
 pub const TAG_RESCAN: isize = 2001;
 pub const TAG_SETTINGS: isize = 2002;
-pub const TAG_SHOW_MORE: isize = 2006;
 pub const TAG_WINDOW: isize = 2007;
 pub const TAG_ITEM_BASE: isize = 1000;
 pub const TAG_GROUP_BASE: isize = 3000;
 /// Well clear of the item tags, which run from `TAG_ITEM_BASE` one per row.
 pub const TAG_REVEAL_BASE: isize = 10_000;
+/// A header row that folds: one per group, then the all-clear screen's own.
+pub const TAG_FOLD_BASE: isize = 100_000;
 
-/// How many of its old targets a group shows in the popover before folding.
+/// How many of its old targets a group shows in the popover while folded.
 const ROWS_PER_GROUP: usize = 3;
 const MAX_HEIGHT: f64 = 680.0;
+/// The all-clear screen has no verdict line: its headline is the verdict.
+const CALM_HEADER_H: f64 = SCAN_HEADER_HEIGHT - 24.0;
 
 pub fn build(state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainThreadMarker) -> (Retained<NSView>, f64) {
     match layout::window_size() {
@@ -48,18 +50,22 @@ pub fn build(state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainThrea
     }
 }
 
+fn header_h(state: &AppState) -> f64 {
+    if calm(state) { CALM_HEADER_H } else { SCAN_HEADER_HEIGHT }
+}
+
 /// The popover: header, a capped list, and the footer in one column.
 fn build_stacked(state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainThreadMarker) -> (Retained<NSView>, f64) {
     let empty = state.empty_targets();
     let plans = plan_groups(&state.targets, &empty, fold(state));
-    let list_h = measure_list(&plans);
-    let body_h = (MAX_HEIGHT - header::SCAN_HEADER_HEIGHT - footer_h(state)).min(list_h);
-    let height = header::SCAN_HEADER_HEIGHT + body_h + footer_h(state);
+    let list_h = measure_list(state, &plans);
+    let body_h = (MAX_HEIGHT - header_h(state) - footer_h(state)).min(list_h);
+    let height = header_h(state) + body_h + footer_h(state);
     let root = widgets::root_view(panel_w(), height, theme, mtm);
-    let (header, footer) = draw_frame(&root, height, state, theme, target, mtm);
+    let frame = draw_frame(&root, height, state, theme, target, mtm);
     let list = crate::scrolling::scroll_document_view(&root, 0.0, footer_h(state), panel_w(), body_h, list_h, mtm);
     let (rows, groups) = draw_list(&list, state, &plans, list_h, theme, target, mtm);
-    live::install_scan(Scan { theme: *theme, header, footer, rows, groups, membership: membership(state), map: None });
+    install(state, theme, frame, rows, groups, None);
     (root, height)
 }
 
@@ -70,37 +76,54 @@ fn build_wide(state: &AppState, theme: &Theme, target: &AnyObject, width: f64, h
     let plans = plan_groups(&state.targets, &empty, fold(state));
     let root = widgets::root_view(width, height, theme, mtm);
     add_fill(&root, panel_w(), 0.0, 1.0, height, theme.line, 1.0, 0.0, mtm);
-    let (header, footer) = draw_frame(&root, height, state, theme, target, mtm);
-    let body_h = height - header::SCAN_HEADER_HEIGHT - footer_h(state);
-    let list_h = measure_list(&plans);
+    let frame = draw_frame(&root, height, state, theme, target, mtm);
+    let body_h = height - header_h(state) - footer_h(state);
+    let list_h = measure_list(state, &plans);
     let list = crate::scrolling::scroll_document_view(&root, 0.0, footer_h(state), panel_w(), body_h, list_h, mtm);
     let (rows, groups) = draw_list(&list, state, &plans, list_h.max(body_h), theme, target, mtm);
-    let frame = layout::map_frame(width, height);
-    usage_map::draw_key(&root, state, frame, theme, mtm);
-    let legend = label(&root, "", frame.origin.x, frame.origin.y - 26.0, frame.size.width, 16.0, 11.5, false, theme.ink_2, true, mtm);
-    let map = usage_map::usage_map(frame, state, legend, theme.dark, mtm);
+    let map_frame = layout::map_frame(width, height);
+    usage_map::draw_key(&root, state, map_frame, theme, mtm);
+    let legend = label(&root, "", map_frame.origin.x, map_frame.origin.y - 26.0, map_frame.size.width, 16.0, 11.5, false, theme.ink_2, true, mtm);
+    let map = usage_map::usage_map(map_frame, state, legend, theme.dark, mtm);
     root.addSubview(&map);
-    live::install_scan(Scan { theme: *theme, header, footer, rows, groups, membership: membership(state), map: Some(map) });
+    install(state, theme, frame, rows, groups, Some(map));
     root
 }
 
-/// Header at the top and footer at the bottom of a popover-wide column. The
+fn install(state: &AppState, theme: &Theme, frame: (Zone, Zone, Zone), rows: Vec<Row>, groups: Vec<Group>, map: Option<Retained<usage_map::MapView>>) {
+    let (header, verdict, footer) = frame;
+    live::install_scan(Scan { theme: *theme, header, verdict, footer, rows, groups, membership: membership(state), calm: calm(state), map });
+}
+
+/// Header at the top and footer at the bottom of a popover-wide column, with
+/// the verdict line as a zone of its own along the header's lower edge. The
 /// header shows everything found; only the clean button counts the selection.
-fn draw_frame(root: &NSView, height: f64, state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainThreadMarker) -> (Zone, Zone) {
-    let header = Zone::new(root, 0.0, height - header::SCAN_HEADER_HEIGHT, header::SCAN_HEADER_HEIGHT, mtm);
+fn draw_frame(root: &NSView, height: f64, state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainThreadMarker) -> (Zone, Zone, Zone) {
+    let header = Zone::new(root, 0.0, height - header_h(state), header_h(state), mtm);
     header.paint(|view, top| header::draw_scan_header(view, top, &header_model(state), theme, mtm));
+    let verdict_h = if calm(state) { 0.0 } else { VERDICT_H };
+    let verdict = Zone::new(root, 0.0, height - header_h(state) + 1.0, verdict_h, mtm);
+    if !calm(state) {
+        verdict.paint(|view, _| scan_verdict::draw(view, &scan_verdict::verdict(state), theme, target, mtm));
+    }
     let footer = Zone::new(root, 0.0, 0.0, footer_h(state) + 1.0, mtm);
     footer.paint(|view, _| draw_footer(view, state, theme, target, mtm));
-    (header, footer)
+    (header, verdict, footer)
 }
 
 /// The popover shows a few of each group's old targets and folds the rest
-/// behind a link; the window has the room, so it shows them all.
+/// under the group's header until it is clicked; the window has the room, so
+/// it shows them all. Either way a group's old targets come first.
 fn fold(state: &AppState) -> Fold {
-    match state.show_all || crate::window::is_visible() {
-        true => Fold::all(),
-        false => Fold { per_group: ROWS_PER_GROUP, keep_days: Some(state.config.max_age_days) },
+    let days = Some(state.config.max_age_days);
+    if crate::window::is_visible() {
+        return Fold { keep_days: days, ..Fold::all() };
     }
+    let mut fold = Fold::folded(ROWS_PER_GROUP, days);
+    for (at, group) in ArtifactGroup::ALL.iter().enumerate() {
+        fold.open[at] = state.open.contains(group.key());
+    }
+    fold
 }
 
 /// What this state would put on the scan list. Compared to the tree we last
@@ -118,8 +141,6 @@ pub fn header_model(state: &AppState) -> ScanHeader {
         total: state.targets.len(),
         discovering: crate::tasks::is_discovering(),
         all_recent: all_clear(state),
-        keep_days: state.config.max_age_days,
-        approximate: !state.reclaim.as_ref().is_some_and(|found| found.covers(&state.targets)),
     }
 }
 
@@ -133,116 +154,65 @@ fn draw_list(
     target: &AnyObject,
     mtm: MainThreadMarker,
 ) -> (Vec<Row>, Vec<Group>) {
-    let list_bottom = 4.0;
+    if calm(state) {
+        crate::scan_calm::draw(root, y, state, theme, mtm);
+        return (Vec::new(), Vec::new());
+    }
     let names = display_names(&state.targets);
-    let empty = state.empty_targets();
     let max_size = state.measured.iter().filter_map(|i| state.targets.get(*i)).map(|t| t.size_bytes).max().unwrap_or(1).max(1);
     let (mut rows, mut groups) = (Vec::new(), Vec::new());
     for plan in plans {
-        if y <= list_bottom + ROW_H {
-            break;
-        }
-        let model = GroupModel {
-            group: plan.group,
-            count: plan.count,
-            size: plan.size,
-            settled: state.group_settled(plan.group),
-            clear: group_clear(state, plan),
-            selection: group_selection(&state.targets, &state.selected, plan.group, &empty),
-        };
-        let (next, group) = scan_rows::draw_group_header(root, y, &model, theme, target, mtm);
+        let (next, group) = scan_rows::draw_group_header(root, y, &group_model(state, plan), theme, target, mtm);
         y = next;
         groups.push(group);
         // A group past the cap gets a scroll view of its own to draw into.
-        let clear = group_clear(state, plan);
         let shown_h = rows_height(plan);
         let all_h = plan.rows.len() as f64 * ROW_H;
         let inner = (all_h > shown_h).then(|| group_scroll::capped(root, y, shown_h, all_h, plan.group.key(), theme, mtm));
         let mut row_y = if inner.is_some() { all_h } else { y };
         for row in &plan.rows {
-            let mut model = row_model(state, row, &names, max_size);
-            // RECENT only tells rows apart where a group has old ones too.
-            model.badge = !clear;
+            let model = RowModel {
+                index: row.index,
+                name: &names[row.index],
+                target: row.target,
+                measured: state.measured.contains(&row.index),
+                max_size,
+                on: state.selected.contains(&row.index),
+            };
             let (next, drawn) = scan_rows::draw_row(inner.as_deref().unwrap_or(root), row_y, &model, theme, target, mtm);
             row_y = next;
             rows.push(drawn);
         }
-        y -= shown_h;
-        y = draw_show_more(root, state, plan, y, list_bottom, theme, target, mtm);
+        y -= shown_h + GROUP_GAP;
+        add_line(root, PAD_X, y + GROUP_GAP / 2.0, content_w(), theme.line, mtm);
     }
     if plans.is_empty() && !state.sizing() && !crate::tasks::is_scanning() {
-        label(
-            root, "Nothing to clean \u{2014} everything is tidy", PAD_X, list_bottom + 20.0,
-            content_w(), 20.0, 13.0, false, theme.ink_2, false, mtm,
-        );
+        label(root, "Nothing to clean \u{2014} everything is tidy", PAD_X, 24.0, content_w(), 20.0, 13.0, false, theme.ink_2, false, mtm);
     }
     (rows, groups)
 }
 
-fn row_model<'a>(
-    state: &'a AppState,
-    row: &'a crate::menu_rows::RowPlan<'a>,
-    names: &'a [String],
-    max_size: u64,
-) -> RowModel<'a> {
-    RowModel {
-        index: row.index,
-        name: &names[row.index],
-        target: row.target,
-        measured: state.measured.contains(&row.index),
-        max_size,
-        on: state.selected.contains(&row.index),
-        max_age_days: state.config.max_age_days,
-        badge: true,
+/// A group's header line. In the popover it folds whenever there is something
+/// folded under it or it has been unfolded; in the window nothing folds.
+fn group_model(state: &AppState, plan: &GroupPlan<'_>) -> GroupModel {
+    let empty = state.empty_targets();
+    let open = state.open.contains(plan.group.key());
+    let folds = !crate::window::is_visible() && (open || plan.hidden() > 0);
+    let clear = nothing_old(&state.targets, &empty, Some(plan.group), state.config.max_age_days);
+    GroupModel {
+        group: plan.group,
+        count: plan.count,
+        shown: plan.rows.len(),
+        size: plan.size,
+        settled: state.group_settled(plan.group),
+        // The verdict line already says so when every group is clear.
+        clear: clear && !all_clear(state),
+        selection: group_selection(&state.targets, &state.selected, plan.group, &empty),
+        fold: folds.then_some(open),
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn draw_show_more(
-    root: &NSView,
-    state: &AppState,
-    plan: &GroupPlan<'_>,
-    mut y: f64,
-    list_bottom: f64,
-    theme: &Theme,
-    target: &AnyObject,
-    mtm: MainThreadMarker,
-) -> f64 {
-    if plan.hidden() > 0 && y > list_bottom + 40.0 {
-        text_button_underlined(
-            root, &show_more_title(state, plan), PAD_X, y - 28.0, content_w(),
-            sel!(handleShowMore:), target, TAG_SHOW_MORE, theme.ink_2, mtm,
-        );
-        y -= 40.0;
-    }
-    if y > list_bottom + 8.0 {
-        add_line(root, PAD_X, y - 4.0, content_w(), theme.line, mtm);
-        y -= 8.0;
-    }
-    y
-}
-
-/// What the link under a group unfolds, said as it is: old targets past the
-/// row budget are "more", recent ones are "recent", and neither is called
-/// smaller. The size is left off until every figure in the group is in.
-fn show_more_title(state: &AppState, plan: &GroupPlan<'_>) -> String {
-    let what = match (plan.more, plan.recent) {
-        (more, 0) => format!("Show {more} more"),
-        (0, recent) => format!("Show {recent} recent"),
-        (more, recent) => format!("Show {more} more and {recent} recent"),
-    };
-    match state.group_settled(plan.group) {
-        true => format!("{what} \u{00b7} {}", scan_size(plan.hidden_bytes)),
-        false => what,
-    }
-}
-
-/// A group none of whose targets is past the keep threshold: healthy.
-fn group_clear(state: &AppState, plan: &GroupPlan<'_>) -> bool {
-    nothing_old(&state.targets, &state.empty_targets(), Some(plan.group), state.config.max_age_days)
-}
-
-/// Nothing listed is past the keep threshold: the header says so, once.
+/// Nothing listed is past the keep threshold: the screen says so, once.
 fn all_clear(state: &AppState) -> bool {
     !state.targets.is_empty() && !state.sizing() && nothing_old(&state.targets, &state.empty_targets(), None, state.config.max_age_days)
 }
@@ -252,17 +222,15 @@ fn rows_height(plan: &GroupPlan<'_>) -> f64 {
     plan.rows.len().min(GROUP_CAP) as f64 * ROW_H
 }
 
-fn measure_list(plans: &[GroupPlan<'_>]) -> f64 {
+/// Between one group's last line and the next group's header, rule included.
+const GROUP_GAP: f64 = 8.0;
+
+fn measure_list(state: &AppState, plans: &[GroupPlan<'_>]) -> f64 {
+    if calm(state) {
+        return CALM_H;
+    }
     if plans.is_empty() {
         return 48.0;
     }
-    let mut h = 8.0;
-    for plan in plans {
-        h += GROUP_H + rows_height(plan);
-        if plan.hidden() > 0 {
-            h += 40.0;
-        }
-        h += 8.0;
-    }
-    h
+    4.0 + plans.iter().map(|plan| GROUP_H + rows_height(plan) + GROUP_GAP).sum::<f64>()
 }

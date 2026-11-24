@@ -1,11 +1,12 @@
-// Debug run for a capped group: expand a 149-row group in the real popover,
-// capture it at its top, middle and bottom, drive it with real scroll-wheel
-// events to show the wheel passing to the outer list at an end, and hover and
-// tick a row that was scrolled into view. WD40_CAPTURE_WINDOW=group.
-// Deps: crate::{capture, group_scroll, mainthread, state, surface}, CoreGraphics.
+// Debug run for a capped group: unfold every group in the real popover,
+// capture the largest at its top, middle and bottom, drive it with real
+// scroll-wheel events to show the wheel passing to the outer list at an end,
+// hover and tick a row, then fold a group by a click on its header.
+// WD40_CAPTURE_WINDOW=group. Deps: crate::{capture, group_scroll, hover_row, state}.
 
 use crate::capture::{note_window, on_main, stage_crowd, WINDOW};
 use crate::group_scroll::{live, GroupScroll};
+use crate::hover_row::HoverRow;
 use crate::mainthread::run_on_main;
 use crate::state::{with_state, with_state_ret};
 use objc2::rc::Retained;
@@ -42,13 +43,7 @@ pub fn run(dir: &str, appearance: &str) {
         let taken = std::process::Command::new("screencapture").args(["-x", "-o", "-l", &number, &path]).status();
         eprintln!("wd-40: captured {path} ({taken:?})");
     };
-    run_on_main(|| on_main(|mtm| {
-        stage_crowd();
-        with_state(|state| state.show_all = true);
-        crate::surface::refresh(mtm);
-        crate::popover::ensure_open(mtm);
-        note_window(crate::popover::content_view());
-    }));
+    run_on_main(|| on_main(stage));
     // The popover needs a moment on screen before anything can be captured.
     std::thread::sleep(Duration::from_millis(700));
     run_on_main(|| {
@@ -68,6 +63,7 @@ pub fn run(dir: &str, appearance: &str) {
     run_on_main(|| say("after 71 wheel events down (the middle)"));
     shoot("middle");
     run_on_main(check_row);
+    shoot("hover");
     run_on_main(|| send(100, -40));
     settle();
     run_on_main(|| say("after 100 more down (the bottom)"));
@@ -78,8 +74,23 @@ pub fn run(dir: &str, appearance: &str) {
     run_on_main(|| send(2, 40));
     settle();
     run_on_main(|| say("after 2 back up: the group takes them"));
+    run_on_main(fold_by_header);
+    shoot("folded");
+    run_on_main(|| say("after the header click and the rebuild"));
     std::thread::sleep(Duration::from_millis(300));
     run_on_main(|| on_main(|mtm| objc2_app_kit::NSApplication::sharedApplication(mtm).terminate(None)));
+}
+
+/// The crowd in the popover with the list on show and every group unfolded.
+fn stage(mtm: objc2_foundation::MainThreadMarker) {
+    stage_crowd();
+    with_state(|state| {
+        state.open.insert(crate::scan_calm::LIST);
+        state.open.extend(wd40::scanner::ArtifactGroup::ALL.iter().map(|group| group.key()));
+    });
+    crate::surface::refresh(mtm);
+    crate::popover::ensure_open(mtm);
+    note_window(crate::popover::content_view());
 }
 
 /// The capped group with the most rows: the one the run is about.
@@ -162,6 +173,50 @@ fn check_row() {
     }
     let (above, below) = group.room();
     eprintln!("group: ticked {before} -> {} after a mouse-down {how}; inner still at {above:.0}/{below:.0}", ticked());
+}
+
+/// Fold the largest group with a real mouse-down on its header line, and say
+/// what the info mark's tooltip is, since no capture can show one.
+fn fold_by_header() {
+    let Some(group) = largest() else { return };
+    let (Some(document), Some(window)) = (unsafe { group.superview() }, group.window()) else { return };
+    if let Some(content) = window.contentView() {
+        say_tooltips(&content);
+    }
+    // The header is the fold row whose lower edge is the group's upper one.
+    let top = group.frame().origin.y + group.frame().size.height;
+    let rows = document.subviews().to_vec().into_iter().filter_map(|view| view.downcast::<HoverRow>().ok());
+    let Some(header) = rows.into_iter().find(|row| row.tag() >= crate::scan_view::TAG_FOLD_BASE && (row.frame().origin.y - top).abs() < 1.0) else {
+        return eprintln!("group: no header row above the group");
+    };
+    let open = || with_state_ret(|state| { let mut open: Vec<_> = state.open.iter().copied().collect(); open.sort(); open }).unwrap_or_default();
+    let (before, outer) = (open(), outer_at(&group));
+    let size = header.bounds().size;
+    let point = header.convertPoint_toView(NSPoint::new(size.width / 2.0, size.height / 2.0), None);
+    let down: Option<Retained<NSEvent>> = unsafe {
+        msg_send![class!(NSEvent), mouseEventWithType: 1_usize, location: point, modifierFlags: 0_usize,
+            timestamp: 0.0_f64, windowNumber: window.windowNumber(), context: std::ptr::null::<AnyObject>(),
+            eventNumber: 0_isize, clickCount: 1_isize, pressure: 1.0_f32]
+    };
+    let mut how = "sent through the window";
+    if let Some(down) = down {
+        window.sendEvent(&down);
+        if open() == before {
+            how = "handed to the header";
+            let _: () = unsafe { msg_send![&*header, mouseDown: &*down] };
+        }
+    }
+    eprintln!("group: header mouse-down {how}: open {before:?} -> {:?}; outer list was at {outer:.0}", open());
+}
+
+/// Every image on show that carries a tooltip, with what the tooltip says.
+fn say_tooltips(view: &NSView) {
+    for child in view.subviews().to_vec() {
+        match (child.downcast_ref::<objc2_app_kit::NSImageView>(), child.toolTip()) {
+            (Some(_), Some(tip)) if !child.isHidden() => eprintln!("group: tooltip on a visible image: {tip:?}"),
+            _ => say_tooltips(&child),
+        }
+    }
 }
 
 /// The hover row under a window point, found the way a click finds it.

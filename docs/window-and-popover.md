@@ -55,10 +55,10 @@ In the window, scan and cleaning keep the popover's column on the left at full
 height and give the rest to the usage map: a treemap of every target, sized by
 its bytes and coloured by its group.
 
-- Scan: the column is the disk gauge, the whole list (the popover folds each
-  group after six rows) and the clean button. On the map a ticked target is
-  solid and an unticked one faint; a click on a tile ticks it, exactly as its
-  row does, and the line under the map names the tile under the pointer.
+- Scan: the column is the disk gauge, the verdict line, the whole list and
+  the clean button (see "The scan screen" below). On the map a ticked target
+  is solid and an unticked one faint; a click on a tile ticks it, exactly as
+  its row does, and the line under the map names the tile under the pointer.
 - Cleaning: the column is the progress figures and a line per target with its
   status. The plate is the scan map itself, in the same frame with the same
   tiles (`layout::map_frame`, `treemap::cells`), so the picture does not jump
@@ -68,6 +68,59 @@ its bytes and coloured by its group.
   the cleared footprints scribed in the steel and untouched tiles in place.
 - Settings: one surface edge to edge, with the settings in a 560pt reading
   column down the middle. No screen is a popover-sized card in the window.
+
+## The scan screen
+
+The screen answers one question, what can safely be cleaned, and says the
+answer once.
+
+- **Header** (`src/header.rs`): free space, the gauge and its legend. The
+  middle segment is everything the scan found, labelled "Artifacts", or
+  "Recent builds" in grey when none of it is old.
+- **Verdict line** (`src/scan_verdict.rs`), under the legend: "N old · up to
+  X can go" with the "Tick them" action beside it. N and X are
+  `selection::old_targets`, the batch the action ticks and auto-clean takes,
+  which leaves simulator devices and toolchains out. When only those are old
+  the line says they are ticked by hand. Once the batch is ticked the line
+  says so and the clean button states the size. The info mark's tooltip says
+  what "old" means and that sizes are as scanned: builds sharing APFS clones
+  overlap, so cleaning can free less than the sum. The line is a zone of its
+  own, so a tick repaints it without rebuilding the gauge.
+- **Groups** (`src/scan_rows.rs`, `src/menu_rows.rs`): one line each: tick
+  box, name, count, total, and a disclosure mark. In the popover a folded
+  group shows up to three of its old targets and its count reads "3 of 17";
+  a click anywhere on the header line unfolds every target, old ones first,
+  and another click folds it again. A group with nothing old is the header
+  line alone, with a green check when some other group does have old
+  targets. The window has the room and shows every group unfolded, with no
+  mark. Which groups are unfolded is `AppState::open`; a rescan clears it.
+- **Rows**: name, kind and age, size. Age is the one sign of old or recent.
+  A cache row adds that removing it costs a download. The reveal-in-Finder
+  control is on show only while the pointer is on the row, when the second
+  line also becomes the directory's path.
+- **Large groups** (`src/group_scroll.rs`): past seven rows a group scrolls
+  inside itself and hands the wheel to the outer list at either end.
+- **Footer** (`src/scan_footer.rs`): the clean button, armed only when
+  something is ticked (otherwise a line of text in its place), the
+  auto-clean receipt, and the shortcuts.
+
+### All clear
+
+When sizes are in, nothing listed is past the keep threshold
+(`selection::nothing_old`) and nothing is ticked, the list is replaced by a
+screen of its own (`src/scan_calm.rs`): the can at rest on clean steel, "All
+clear", the threshold, and the next target to turn old with the days until it
+does (`scan_calm::next_old`; never a simulator device or a toolchain). The
+header has no verdict line and the footer has no clean button. One row,
+"N recent builds in M groups", unfolds the ordinary list for ticking a recent
+build by hand; "Hide list" on the verdict line puts it away. In the window the
+left column is this screen and the map shows the recent targets as faint
+tiles.
+
+The screen gives way to the list as soon as the state no longer matches: a
+target ages past the threshold, a tile is ticked on the map, or a scan starts.
+The live patches in `src/live.rs` refuse a tree built for the other screen, so
+the change is always a rebuild.
 
 ## The two figures on the done screen
 

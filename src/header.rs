@@ -96,11 +96,9 @@ pub struct ScanHeader {
     pub measured: usize,
     pub total: usize,
     pub discovering: bool,
-    pub approximate: bool,
     /// Nothing found is past the keep threshold: the figures are recent
-    /// builds, not something to reclaim, and the verdict is "all clear".
+    /// builds, not something waiting to be cleaned.
     pub all_recent: bool,
-    pub keep_days: u64,
 }
 
 impl ScanHeader {
@@ -111,35 +109,14 @@ impl ScanHeader {
     pub fn in_progress(&self) -> bool {
         self.discovering || self.sizing()
     }
-
-    /// One qualifier at a time: a settling total is a floor; a settled scan
-    /// total is an upper bound until physical accounting is requested.
-    fn reclaimable_qualifier(&self) -> &'static str {
-        if self.discovering {
-            ""
-        } else if self.sizing() {
-            "\u{2265} "
-        } else if self.approximate {
-            "up to "
-        } else {
-            ""
-        }
-    }
 }
 
+/// The disk figures, gauge and legend, in a zone whose lower edge is the
+/// header's rule. The verdict line under the legend is `scan_verdict`'s.
 pub fn draw_scan_header(parent: &NSView, y_top: f64, model: &ScanHeader, theme: &Theme, mtm: MainThreadMarker) {
-    let y = y_top - SCAN_HEADER_HEIGHT;
-    add_line(parent, 0.0, y, panel_w(), theme.line, mtm);
+    add_line(parent, 0.0, 0.0, panel_w(), theme.line, mtm);
     let Some(disk) = model.disk else {
         label(parent, "Disk unavailable", PAD_X, y_top - 38.0, content_w(), 24.0, 14.0, false, theme.ink_2, false, mtm);
-        if model.in_progress() {
-            let detail = if model.discovering {
-                "Finding build artifacts\u{2026}"
-            } else {
-                "Measuring build artifacts\u{2026}"
-            };
-            label(parent, detail, PAD_X, y_top - 72.0, 230.0, 16.0, 11.5, false, theme.ink_3, true, mtm);
-        }
         return;
     };
 
@@ -154,12 +131,13 @@ pub fn draw_scan_header(parent: &NSView, y_top: f64, model: &ScanHeader, theme: 
         crate::motion::reset_scan_gauge();
     }
     let reclaimable = if model.discovering { 0 } else { model.reclaimable.min(used) };
+    // Everything found, by name: how much of it is old is the verdict's to say.
     let tone = if model.all_recent { theme.ink_3 } else { theme.accent };
     crate::header_legend::draw_legend_row(
         parent,
         y_top - 86.0,
         [
-            (if model.all_recent { "Recent builds" } else { "Reclaimable" }, human_size(reclaimable), tone),
+            (if model.all_recent { "Recent builds" } else { "Artifacts" }, human_size(reclaimable), tone),
             ("In use", human_size(used.saturating_sub(reclaimable)), theme.ink_4),
             ("Free", human_size(disk.free_bytes), theme.pos),
         ],
@@ -167,45 +145,6 @@ pub fn draw_scan_header(parent: &NSView, y_top: f64, model: &ScanHeader, theme: 
         mtm,
     );
 
-    draw_scan_detail(parent, y_top, disk, reclaimable, model, theme, mtm);
-}
-
-/// The line under the legend: what cleaning would leave free, or what the scan
-/// is still doing, and how far through the measuring it is.
-fn draw_scan_detail(
-    parent: &NSView,
-    y_top: f64,
-    disk: DiskSpace,
-    reclaimable: u64,
-    model: &ScanHeader,
-    theme: &Theme,
-    mtm: MainThreadMarker,
-) {
-    let after = disk.free_bytes.saturating_add(reclaimable).min(disk.total_bytes);
-    let bound = if model.sizing() {
-        "at least "
-    } else if model.approximate {
-        "up to "
-    } else {
-        ""
-    };
-    let detail = if model.discovering {
-        "Finding build artifacts\u{2026}".to_string()
-    } else if model.sizing() {
-        "Measuring build artifacts\u{2026}".to_string()
-    } else {
-        format!("\u{2192} {bound}{} free after cleaning", scan_size(after))
-    };
-    // The verdict, said once: with nothing old, the screen is all clear.
-    let (detail, ink) = match model.all_recent && !model.in_progress() {
-        true => (format!("\u{2713} All clear \u{00b7} nothing older than {}d", model.keep_days), theme.ok),
-        false => (detail, theme.ink_3),
-    };
-    label(parent, &detail, PAD_X, y_top - 112.0, 300.0, 16.0, 11.5, false, ink, true, mtm);
-    if model.sizing() {
-        let counted = format!("{} of {} measured", model.measured, model.total);
-        label_right(parent, &counted, PAD_X + 230.0, y_top - 112.0, content_w() - 230.0, 16.0, 11.5, theme.ink_3, true, mtm);
-    }
 }
 
 fn draw_scan_gauge(
@@ -263,33 +202,4 @@ fn draw_gauge(
     let art_w = w * parts.artifacts;
     add_fill(parent, PAD_X, y, used_w, 7.0, theme.ink_4, 1.0, 3.5, mtm);
     add_fill(parent, PAD_X + used_w, y, art_w.max(0.0), 7.0, theme.accent, 1.0, 3.5, mtm);
-}
-#[cfg(test)]
-mod tests {
-    use super::ScanHeader;
-
-    fn model(measured: usize, total: usize, discovering: bool, approximate: bool) -> ScanHeader {
-        ScanHeader {
-            disk: None,
-            reclaimable: 10,
-            measured,
-            total,
-            discovering,
-            approximate,
-            all_recent: false,
-            keep_days: 7,
-        }
-    }
-
-    #[test]
-    fn sizing_uses_the_floor_qualifier_alone() {
-        assert_eq!(model(0, 1, false, true).reclaimable_qualifier(), "\u{2265} ");
-        assert_eq!(model(0, 0, true, true).reclaimable_qualifier(), "");
-    }
-
-    #[test]
-    fn settled_allocated_total_uses_the_upper_bound_qualifier() {
-        assert_eq!(model(1, 1, false, true).reclaimable_qualifier(), "up to ");
-        assert_eq!(model(1, 1, false, false).reclaimable_qualifier(), "");
-    }
 }
