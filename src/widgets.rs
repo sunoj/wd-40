@@ -40,10 +40,8 @@ pub fn label_stripe(view: &NSView, mtm: MainThreadMarker) {
 
 /// The same surface without the label: content that scrolls inside a screen.
 pub fn sheet_view(width: f64, height: f64, theme: &Theme, mtm: MainThreadMarker) -> Retained<NSView> {
-    let view = NSView::initWithFrame(
-        NSView::alloc(mtm),
-        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(width, height)),
-    );
+    let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(width, height));
+    let view = NSView::initWithFrame(NSView::alloc(mtm), frame);
     add_fill(&view, 0.0, 0.0, width, height, theme.surface, 1.0, 0.0, mtm);
     view
 }
