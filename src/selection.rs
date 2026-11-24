@@ -5,7 +5,7 @@
 
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime};
-use wd40::scanner::{ArtifactGroup, TargetDir};
+use wd40::scanner::{ArtifactGroup, ArtifactKind, TargetDir};
 
 const SECONDS_PER_DAY: u64 = 86_400;
 
@@ -33,6 +33,35 @@ pub fn is_recent(target: &TargetDir, max_age_days: u64) -> bool {
         .duration_since(target.last_modified)
         .map(|age| age < max_age)
         .unwrap_or(false)
+}
+
+/// The batch "tick the old ones" stands for: every listed target that is past
+/// the keep threshold by the same test as the RECENT badge. It only names
+/// positions; ticking them changes a selection and nothing else. Toolchains
+/// and simulator devices stay out, as they do for auto-clean: their age says
+/// nothing about whether they are still in use, so they are ticked by hand.
+pub fn old_targets(targets: &[TargetDir], empty: &HashSet<usize>, max_age_days: u64) -> HashSet<usize> {
+    (0..targets.len())
+        .filter(|index| !empty.contains(index) && in_old_batch(&targets[*index], max_age_days))
+        .collect()
+}
+
+fn in_old_batch(target: &TargetDir, max_age_days: u64) -> bool {
+    !matches!(target.kind, ArtifactKind::Toolchain | ArtifactKind::Simulator)
+        && !is_recent(target, max_age_days)
+}
+
+/// True when no listed target — of `group`, or of any group — is past the keep
+/// threshold. This is the list's own per-row test, the one that folds a row
+/// away as recent, so a group reads as clear exactly when it would show no
+/// old rows. It is deliberately not `old_targets`: an old simulator is an old
+/// row even though the tick-old batch leaves it alone.
+pub fn nothing_old(targets: &[TargetDir], empty: &HashSet<usize>, group: Option<ArtifactGroup>, max_age_days: u64) -> bool {
+    !targets.iter().enumerate().any(|(index, target)| {
+        !empty.contains(&index)
+            && group.is_none_or(|group| target.kind.group() == group)
+            && !is_recent(target, max_age_days)
+    })
 }
 
 /// Nothing is checked after a scan. Deleting here is irreversible and skips the
@@ -195,5 +224,51 @@ mod tests {
         let measured = HashSet::from([0, 2]);
         assert_eq!(empty_measured(&targets, &measured), HashSet::from([0]));
         assert_eq!(settled_order(&targets, &measured), vec![2, 1]);
+    }
+
+    /// Ticking the old batch takes exactly the targets past the threshold:
+    /// none that are recent, and none the list has dropped as empty.
+    #[test]
+    fn the_old_batch_is_exactly_the_targets_past_the_threshold() {
+        use std::time::{Duration, SystemTime};
+        let at = |days: u64| TargetDir {
+            path: std::path::PathBuf::from(format!("/w/{days}/target")),
+            size_bytes: 1,
+            last_modified: SystemTime::now() - Duration::from_secs(days * 86_400 + 60),
+            kind: wd40::scanner::ArtifactKind::RustTarget,
+        };
+        let kind = |kind, target: TargetDir| TargetDir { kind, ..target };
+        let targets = [
+            at(0), at(6), at(7), at(8), at(400), at(90),
+            kind(wd40::scanner::ArtifactKind::Simulator, at(90)),
+            kind(wd40::scanner::ArtifactKind::Toolchain, at(90)),
+        ];
+        let empty = std::collections::HashSet::from([5]);
+        let old = super::old_targets(&targets, &empty, 7);
+        assert_eq!(old, std::collections::HashSet::from([2, 3, 4]));
+        assert!(old.iter().all(|index| !super::is_recent(&targets[*index], 7)));
+    }
+
+    /// A group is clear exactly when it has no old rows, whatever tick-old
+    /// would do with them: old simulators keep their group from being clear.
+    #[test]
+    fn clear_follows_the_rows_not_the_tick_old_batch() {
+        use std::time::{Duration, SystemTime};
+        use wd40::scanner::{ArtifactGroup, ArtifactKind};
+        let at = |kind: ArtifactKind, days: u64| TargetDir {
+            path: std::path::PathBuf::from(format!("/w/{days}/x")),
+            size_bytes: 1,
+            last_modified: SystemTime::now() - Duration::from_secs(days * 86_400 + 60),
+            kind,
+        };
+        let none = std::collections::HashSet::new();
+        let targets = [at(ArtifactKind::RustTarget, 1), at(ArtifactKind::NodeModules, 2), at(ArtifactKind::Simulator, 90)];
+        assert!(super::nothing_old(&targets, &none, Some(ArtifactGroup::Rust), 7));
+        assert!(super::old_targets(&targets, &none, 7).is_empty());
+        assert!(!super::nothing_old(&targets, &none, Some(ArtifactGroup::Simulators), 7));
+        assert!(!super::nothing_old(&targets, &none, None, 7));
+        assert!(super::nothing_old(&targets[..2], &none, None, 7));
+        // An old target the list has dropped as empty is not a row either.
+        assert!(super::nothing_old(&targets, &std::collections::HashSet::from([2]), None, 7));
     }
 }

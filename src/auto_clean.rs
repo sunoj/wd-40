@@ -1,6 +1,6 @@
 // Unattended clean policy and runner, independent of manual row selection.
 // Exports: timer entry point, receipt text, pending-snapshot application.
-// Deps: crate::{names, popover, state, tasks}, wd40 scan/clean APIs.
+// Deps: crate::{names, state, surface, tasks}, wd40 scan/clean APIs.
 
 use crate::names::display_names;
 use crate::state::{with_state, with_state_ret, UiScreen};
@@ -42,7 +42,7 @@ pub struct PopoverOpening(());
 pub fn start() {
     let cleaning_screen = with_state_ret(|state| state.screen == UiScreen::Cleaning)
         .unwrap_or(false);
-    if !can_start(crate::tasks::is_busy(), cleaning_screen, crate::popover::is_open()) {
+    if !can_start(crate::tasks::is_busy(), cleaning_screen, crate::surface::is_open()) {
         return;
     }
     let Some(config) = with_state_ret(|state| state.config.clone()) else { return };

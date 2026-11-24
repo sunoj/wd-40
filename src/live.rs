@@ -2,7 +2,7 @@
 // arriving or a tile coming off the plate repaints those instead of rebuilding
 // the popover. The old full rebuild also threw away the scroll position, the
 // hover and the spray in flight, which is why those states jumped.
-// Exports: `Zone`, `Scan`, `Clean`, `install_*`, `clear`, `scan_matches`, `chrome_changed`, the `*_changed` hooks.
+// Exports: `Scan`, `Clean`, `install_*`, `clear`, `scan_matches`, `chrome_changed`, the `*_changed` hooks.
 // Deps: crate view modules + state + theme; objc2 AppKit.
 
 use crate::checkbox::CheckBox;
@@ -10,12 +10,12 @@ use crate::menu_rows::Membership;
 use crate::plate::PlateView;
 use crate::state::{with_state_ret, AppState, UiScreen};
 use crate::theme::Theme;
+use crate::zone::Zone;
 use crate::{MenuHandler, HANDLER};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
-use objc2::MainThreadOnly;
-use objc2_app_kit::{NSBox, NSTextField, NSView};
-use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize};
+use objc2_app_kit::{NSBox, NSTextField};
+use objc2_foundation::MainThreadMarker;
 use std::cell::RefCell;
 use wd40::scanner::ArtifactGroup;
 
@@ -24,52 +24,14 @@ thread_local! {
     static CLEAN: RefCell<Option<Clean>> = const { RefCell::new(None) };
 }
 
-/// A slice of the popover that is cheap to draw whole — a dozen views, against
-/// several hundred for the screen. Its frame is its own region, so the drawing
-/// code inside it keeps the coordinates it already used.
-pub struct Zone {
-    view: Retained<NSView>,
-    top: f64,
-}
-
-impl Zone {
-    pub fn new(parent: &NSView, y: f64, height: f64, mtm: MainThreadMarker) -> Self {
-        let width = crate::widgets::POPOVER_WIDTH;
-        let view = NSView::initWithFrame(
-            NSView::alloc(mtm),
-            NSRect::new(NSPoint::new(0.0, y), NSSize::new(width, height)),
-        );
-        parent.addSubview(&view);
-        Self { view, top: height }
-    }
-
-    /// The zone's own top edge, which is what its drawing function counts down from.
-    pub fn top(&self) -> f64 {
-        self.top
-    }
-
-    pub fn view(&self) -> &NSView {
-        &self.view
-    }
-
-    /// Empty it ready to be drawn again.
-    pub fn clear(&self) {
-        for view in self.view.subviews().to_vec() {
-            view.removeFromSuperview();
-        }
-    }
-}
-
 pub struct Row {
     pub index: usize,
     pub size: Retained<NSTextField>,
     pub check: CheckBox,
-    /// Accent bar behind the row, drawn to the size's share of the largest row.
+    /// Meter under the row, drawn to the size's share of the largest row.
     pub wash: Retained<NSBox>,
     /// Second line: kind and age. Ages go stale while the popover is shut.
     pub age: Retained<NSTextField>,
-    /// RECENT marker. Same clock as the age line; hidden once the row is old.
-    pub badge: Retained<NSView>,
 }
 
 pub struct Group {
@@ -81,10 +43,14 @@ pub struct Group {
 pub struct Scan {
     pub theme: Theme,
     pub header: Zone,
+    /// The verdict line under the header's legend.
+    pub verdict: Zone,
     pub footer: Zone,
     pub rows: Vec<Row>,
     pub groups: Vec<Group>,
     pub membership: Membership,
+    /// The window's map of the same targets; the popover has none.
+    pub map: Option<Retained<crate::usage_map::MapView>>,
 }
 
 pub struct Clean {
@@ -96,8 +62,8 @@ pub struct Clean {
     pub caption: Retained<NSTextField>,
     pub path: Retained<NSTextField>,
     pub plate: Retained<PlateView>,
-    /// Region of the plate the crust may cover, fixed for the run.
-    pub crust: NSRect,
+    /// The window's line-per-target list; the popover has none.
+    pub list: Option<crate::clean_list::CleanList>,
 }
 
 pub fn install_scan(scan: Scan) {
@@ -108,6 +74,23 @@ pub fn install_scan(scan: Scan) {
 pub fn install_clean(clean: Clean) {
     clear();
     CLEAN.with(|cell| *cell.borrow_mut() = Some(clean));
+}
+
+/// Seconds until the plate has played every removal it has been told of.
+pub fn lifts_left() -> f64 {
+    CLEAN.with(|cell| cell.borrow().as_ref().map_or(0.0, |clean| clean.plate.seconds_left()))
+}
+
+/// The scan map on show, for the debug run that clicks it.
+#[cfg(debug_assertions)]
+pub fn scan_map() -> Option<Retained<crate::usage_map::MapView>> {
+    SCAN.with(|cell| cell.borrow().as_ref().and_then(|scan| scan.map.clone()))
+}
+
+/// The plate on show, for the debug run that samples its layers.
+#[cfg(debug_assertions)]
+pub fn clean_plate() -> Option<Retained<PlateView>> {
+    CLEAN.with(|cell| cell.borrow().as_ref().map(|clean| clean.plate.clone()))
 }
 
 /// Drop every handle. Called before each rebuild — the views they point at are
@@ -153,7 +136,7 @@ pub fn sizes_arrived(arrived: &[usize], mtm: MainThreadMarker) -> bool {
             // The footer stays on "Measuring" until every size is in. Rebuilding
             // it on each hop is the same button, and it is the expensive half.
             if state.sizing() {
-                redraw_scan_header(scan, state, mtm);
+                redraw_scan_header(scan, state, target, mtm);
             } else {
                 redraw_scan_frame(scan, state, target, mtm);
             }
@@ -178,6 +161,11 @@ pub fn selection_changed(mtm: MainThreadMarker) -> bool {
         SCAN.with(|cell| {
             let held = cell.borrow();
             let Some(scan) = held.as_ref() else { return false };
+            // The clean button comes and goes with the first and last tick, and
+            // the footer's height with it: that takes a rebuild, not a patch.
+            if scan.footer.height() != crate::scan_footer::footer_h(state) + 1.0 {
+                return false;
+            }
             for row in &scan.rows {
                 let on = state.selected.contains(&row.index);
                 row.check.set(crate::selection::GroupSelection::from(on), &scan.theme);
@@ -189,8 +177,11 @@ pub fn selection_changed(mtm: MainThreadMarker) -> bool {
                 );
                 group.check.set(selection, &scan.theme);
             }
-            scan.footer.clear();
-            crate::scan_view::draw_footer(scan.footer.view(), state, &scan.theme, target, mtm);
+            if let Some(map) = &scan.map {
+                map.sync(&state.selected);
+            }
+            redraw_verdict(scan, state, target, mtm);
+            scan.footer.repaint(|view, _| crate::scan_footer::draw_footer(view, state, &scan.theme, target, mtm));
             true
         })
     })
@@ -209,19 +200,19 @@ pub fn totals_changed(mtm: MainThreadMarker) -> bool {
     })
 }
 
-/// Disk free space, row ages and RECENT badges go stale while the popover is
-/// shut. Membership is unchanged, so the tree stays; only the header and the
-/// age line move.
+/// Disk free space and row ages go stale while the popover is shut.
+/// Membership is unchanged, so the tree stays; only the header, the verdict
+/// and the age line move.
 pub fn chrome_changed(mtm: MainThreadMarker) -> bool {
     let _span = crate::trace::span("chrome_changed");
-    patch(UiScreen::Scan, |state, _target| {
+    patch(UiScreen::Scan, |state, target| {
         SCAN.with(|cell| {
             let held = cell.borrow();
             let Some(scan) = held.as_ref() else { return false };
-            redraw_scan_header(scan, state, mtm);
+            redraw_scan_header(scan, state, target, mtm);
             for row in &scan.rows {
-                if let Some(target) = state.targets.get(row.index) {
-                    crate::scan_rows::show_age(&row.age, &row.badge, target, state.config.max_age_days);
+                if let Some(found) = state.targets.get(row.index) {
+                    crate::scan_rows::show_age(&row.age, found);
                 }
             }
             true
@@ -230,26 +221,22 @@ pub fn chrome_changed(mtm: MainThreadMarker) -> bool {
 }
 
 /// One tick of a clean: the strip, the header, the path and the plate's tiles.
+/// The plate takes the new state in place; only tiles that changed are touched.
 pub fn progress_changed(mtm: MainThreadMarker) -> bool {
     patch(UiScreen::Cleaning, |state, target| {
         CLEAN.with(|cell| {
             let held = cell.borrow();
             let Some(live) = held.as_ref() else { return false };
             let Some(progress) = state.cleaning.clone() else { return false };
-            live.header.clear();
-            live.strip.clear();
-            live.footer.clear();
-            crate::clean_view::draw_disk_header(
-                live.header.view(), live.header.top(), state, &progress, &live.theme, mtm,
-            );
-            crate::clean_view::draw_strip(
-                live.strip.view(), live.strip.top(), &progress, &live.theme, mtm,
-            );
-            crate::clean_view::draw_footer(
-                live.footer.view(), &progress, &live.theme, target, mtm,
-            );
+            let theme = &live.theme;
+            live.header.repaint(|view, top| crate::clean_view::draw_disk_header(view, top, state, &progress, theme, mtm));
+            live.strip.repaint(|view, top| crate::clean_view::draw_strip(view, top, &progress, theme, mtm));
+            live.footer.repaint(|view, _| crate::clean_view::draw_footer(view, &progress, theme, target, mtm));
             crate::clean_view::show_path(&live.caption, &live.path, &progress);
-            live.plate.update(&progress, live.crust);
+            live.plate.update(&progress);
+            if let Some(list) = &live.list {
+                list.update(&progress);
+            }
             true
         })
     })
@@ -268,21 +255,21 @@ fn largest(state: &AppState) -> u64 {
         .max(1)
 }
 
-fn redraw_scan_header(scan: &Scan, state: &AppState, mtm: MainThreadMarker) {
-    scan.header.clear();
-    crate::header::draw_scan_header(
-        scan.header.view(),
-        scan.header.top(),
-        &crate::scan_view::header_model(state),
-        &scan.theme,
-        mtm,
-    );
+fn redraw_scan_header(scan: &Scan, state: &AppState, target: &AnyObject, mtm: MainThreadMarker) {
+    let model = crate::scan_view::header_model(state);
+    scan.header.repaint(|view, top| crate::header::draw_scan_header(view, top, &model, &scan.theme, mtm));
+    redraw_verdict(scan, state, target, mtm);
+}
+
+/// The verdict line alone: a tick changes what it says, and nothing above it.
+fn redraw_verdict(scan: &Scan, state: &AppState, target: &AnyObject, mtm: MainThreadMarker) {
+    let verdict = crate::scan_verdict::verdict(state);
+    scan.verdict.repaint(|view, _| crate::scan_verdict::draw(view, &verdict, &scan.theme, target, mtm));
 }
 
 fn redraw_scan_frame(scan: &Scan, state: &AppState, target: &AnyObject, mtm: MainThreadMarker) {
-    redraw_scan_header(scan, state, mtm);
-    scan.footer.clear();
-    crate::scan_view::draw_footer(scan.footer.view(), state, &scan.theme, target, mtm);
+    redraw_scan_header(scan, state, target, mtm);
+    scan.footer.repaint(|view, _| crate::scan_footer::draw_footer(view, state, &scan.theme, target, mtm));
 }
 
 /// Run `body` only while `screen` is the one on show, with the state and the

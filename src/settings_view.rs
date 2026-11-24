@@ -3,9 +3,9 @@
 // Exports: `build`, disclosure state/actions, choice tag decoders, and row tags.
 // Deps: crate::{controls, header, scrolling, settings_row, state, theme, widgets}.
 
+use crate::layout::content_w;
 use crate::controls::days_slider;
 use crate::header::scan_size;
-use crate::settings_chrome::{draw_brand, draw_footer, BRAND_H, FOOTER_H};
 use crate::settings_row::{
     choice_list_height, disclosure_row, divider, group_row, section, switch_row, value_row,
     ChoiceSpec, GroupSpec, Spec,
@@ -13,13 +13,13 @@ use crate::settings_row::{
 use crate::state::AppState;
 use crate::theme::Theme;
 use crate::widgets::{
-    self, label, label_right, CONTENT_WIDTH, PAD_X, POPOVER_WIDTH,
+    label, label_right, PAD_X,
 };
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::sel;
 use objc2_app_kit::NSView;
-use objc2_foundation::{MainThreadMarker, NSPoint};
+use objc2_foundation::MainThreadMarker;
 use std::cell::Cell;
 use wd40::scanner::ArtifactGroup;
 
@@ -29,10 +29,6 @@ pub const TAG_ROOT_BASE: isize = 2300;
 pub(crate) const TAG_INTERVAL_BASE: isize = 2400;
 pub(crate) const TAG_DEPTH_BASE: isize = 2500;
 
-const MAX_HEIGHT: f64 = 540.0;
-/// Room for every section at once. What the body actually uses is measured off
-/// the drawing rather than predicted by a second copy of the layout.
-const SHEET_H: f64 = 1400.0;
 
 const INTERVALS: [(u64, &str); 5] = [(0, "Off"), (1, "1h"), (6, "6h"), (12, "12h"), (24, "1d")];
 const DEPTHS: [(usize, &str); 4] = [(4, "4 levels"), (6, "6 levels"), (8, "8 levels"), (10, "10 levels")];
@@ -50,25 +46,13 @@ pub fn build(
     target: &AnyObject,
     mtm: MainThreadMarker,
 ) -> (Retained<NSView>, f64) {
-    let sheet = widgets::root_view(SHEET_H, theme.surface, mtm);
-    let used = SHEET_H - draw_body(&sheet, SHEET_H, state, theme, target, mtm);
-
-    let body_limit = MAX_HEIGHT - BRAND_H - FOOTER_H + disclosure_height();
-    let body_h = used.min(body_limit);
-    let height = BRAND_H + body_h + FOOTER_H;
-    let root = widgets::root_view(height, theme.surface, mtm);
-    draw_brand(&root, height, theme, mtm);
-    let document =
-        crate::scrolling::scroll_document_view(&root, 0.0, FOOTER_H, POPOVER_WIDTH, body_h, used, mtm);
-    // The sheet is taller than what it drew, so hang it from the document's top
-    // edge and let the empty tail fall below the scroller.
-    sheet.setFrameOrigin(NSPoint::new(0.0, document.frame().size.height - SHEET_H));
-    document.addSubview(&sheet);
-    draw_footer(&root, theme, target, mtm);
-    (root, height)
+    match crate::layout::window_size() {
+        Some((width, height)) => (crate::settings_frame::build_wide(state, theme, target, width, height, mtm), height),
+        None => crate::settings_frame::build_column(state, theme, target, None, mtm),
+    }
 }
 
-fn draw_body(
+pub(crate) fn draw_body(
     sheet: &NSView,
     mut y: f64,
     state: &AppState,
@@ -126,7 +110,15 @@ fn draw_scanning(
         },
         &depth, open == Some(SettingsDisclosure::ScanDepth), &depth_choices, theme, target, mtm,
     );
-    switch_row(
+    draw_menu_bar(parent, y, state, theme, target, mtm)
+}
+
+/// The two switches for what the menu bar item shows: the figure, and colour.
+fn draw_menu_bar(
+    parent: &NSView, y: f64, state: &AppState,
+    theme: &Theme, target: &AnyObject, mtm: MainThreadMarker,
+) -> f64 {
+    let y = switch_row(
         parent, y,
         &Spec {
             title: "Show size in menu bar",
@@ -134,6 +126,15 @@ fn draw_scanning(
             action: sel!(settingsToggleMenuBarSize:),
         },
         state.config.menu_bar_size, theme, target, mtm,
+    );
+    switch_row(
+        parent, y,
+        &Spec {
+            title: "Colour in menu bar",
+            hint: Some("Tint the glyph and size as artifacts pile up"),
+            action: sel!(settingsToggleMenuBarColor:),
+        },
+        state.config.menu_bar_color, theme, target, mtm,
     )
 }
 
@@ -195,10 +196,10 @@ fn draw_safety(
     let days = state.config.max_age_days;
     label(parent, "Keep builds newer than", PAD_X, y - 20.0, 220.0, 16.0, 13.5, false, theme.ink, false, mtm);
     let age = if days == 1 { "1 day".to_string() } else { format!("{days} days") };
-    label_right(parent, &age, PAD_X + 200.0, y - 20.0, CONTENT_WIDTH - 200.0, 16.0, 12.5, theme.ink, true, mtm);
-    days_slider(parent, days, PAD_X, y - 48.0, CONTENT_WIDTH, sel!(settingsSetMaxAge:), target, 0, mtm);
+    label_right(parent, &age, PAD_X + 200.0, y - 20.0, content_w() - 200.0, 16.0, 12.5, theme.ink, true, mtm);
+    days_slider(parent, days, PAD_X, y - 48.0, content_w(), sel!(settingsSetMaxAge:), target, 0, mtm);
     label(parent, "0d", PAD_X, y - 66.0, 40.0, 14.0, 10.5, false, theme.ink_4, true, mtm);
-    label_right(parent, "30d", PAD_X + CONTENT_WIDTH - 40.0, y - 66.0, 40.0, 14.0, 10.5, theme.ink_4, true, mtm);
+    label_right(parent, "30d", PAD_X + content_w() - 40.0, y - 66.0, 40.0, 14.0, 10.5, theme.ink_4, true, mtm);
     y - 78.0
 }
 
@@ -260,7 +261,7 @@ pub fn depth_for_tag(tag: isize) -> Option<usize> {
 
 fn open_disclosure() -> Option<SettingsDisclosure> { OPEN_DISCLOSURE.get() }
 
-fn disclosure_height() -> f64 {
+pub(crate) fn disclosure_height() -> f64 {
     match open_disclosure() {
         Some(SettingsDisclosure::AutoClean) => choice_list_height(INTERVALS.len()),
         Some(SettingsDisclosure::ScanDepth) => choice_list_height(DEPTHS.len()),

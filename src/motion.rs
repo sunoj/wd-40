@@ -1,7 +1,8 @@
 // The popover's animation, and the single place Reduce Motion is honoured for
 // it: with that setting on every helper here lands on the final state at once,
 // so nothing is ever left mid-transition.
-// Exports: `arrive`, `glide`, scan gauge and discovery sweep motion.
+// Exports: `arrive`, `glide`, `lift`, `travel`, `fade`, `puff`, scan gauge and discovery
+// sweep motion.
 // Deps: objc2 AppKit animator proxy, crate::metal::reduce_motion.
 
 use crate::metal::reduce_motion;
@@ -22,7 +23,11 @@ thread_local! {
 /// as a list filling in rather than a light show.
 const ARRIVE: f64 = 0.22;
 /// Something moving or growing: a bar, a plate tile, a row.
-const GLIDE: f64 = 0.3;
+pub const GLIDE: f64 = 0.3;
+/// How far a tile rises as it leaves the plate.
+const RISE: f64 = 46.0;
+/// How long a burst of spray hangs in the air.
+const PUFF: f64 = 0.5;
 const SWEEP_PERIOD: f64 = 1.8;
 const SWEEP_WIDTH: f64 = 38.0;
 pub const DISCOVERY_SWEEP_INTERVAL: f64 = 1.0 / 36.0;
@@ -54,6 +59,50 @@ pub fn arrive(view: &NSView) {
     }
     view.setAlphaValue(0.0);
     grouped(ARRIVE, || view.animator().setAlphaValue(1.0));
+}
+
+/// A plate tile whose target has really been removed comes up off the steel:
+/// it rises, swells a little toward the eye, and thins out as it goes. Under
+/// Reduce Motion it is simply gone, which is the same final state.
+pub fn lift(view: &NSView, seconds: f64) {
+    if reduce_motion() {
+        view.setAlphaValue(0.0);
+        return;
+    }
+    let from = view.frame();
+    let swell = (from.size.width.min(from.size.height) * 0.08).clamp(2.0, 8.0);
+    let to = NSRect::new(
+        NSPoint::new(from.origin.x - swell, from.origin.y - swell + RISE),
+        NSSize::new(from.size.width + swell * 2.0, from.size.height + swell * 2.0),
+    );
+    grouped(seconds, || {
+        view.animator().setFrame(to);
+        view.animator().setAlphaValue(0.0);
+    });
+}
+
+/// Move a view to `frame` over `seconds`: the can crossing the plate.
+pub fn travel(view: &NSView, frame: NSRect, seconds: f64) {
+    glide_for(view, frame, seconds);
+}
+
+/// Bring a view to `alpha`: at once under Reduce Motion, over `duration` otherwise.
+pub fn fade(view: &NSView, alpha: f64, duration: f64) {
+    if reduce_motion() {
+        view.setAlphaValue(alpha);
+        return;
+    }
+    grouped(duration, || view.animator().setAlphaValue(alpha));
+}
+
+/// One burst of spray: it shows, then thins out. Reduce Motion never shows it.
+pub fn puff(view: &NSView) {
+    view.setAlphaValue(0.0);
+    if reduce_motion() {
+        return;
+    }
+    view.setAlphaValue(0.8);
+    grouped(PUFF, || view.animator().setAlphaValue(0.0));
 }
 
 /// Move or resize a view to `frame`.

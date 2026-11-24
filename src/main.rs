@@ -1,24 +1,30 @@
-// Entry point for the macOS WD-40 status-item popover app.
+// Entry point for the macOS WD-40 menu bar app.
 // Owns the status item, app state, and Objective-C action handler.
-// Deps: objc2 AppKit; UI in `popover` + views; work in `tasks`.
+// Deps: objc2 AppKit; UI in `surface` (popover or window) + views; work in `tasks`.
 
 mod actions;
 mod auto_clean;
 mod autostart;
 mod cache_names;
 mod can;
+#[cfg(debug_assertions)]
+mod capture;
+#[cfg(debug_assertions)]
+mod capture_group;
 mod checkbox;
+mod choreo;
+mod clean_list;
 mod clean_view;
 mod controls;
 mod crust;
 mod disk_gauge;
 mod done_view;
-mod drift;
-mod grip;
+mod group_scroll;
 mod header;
+mod header_legend;
 mod hover_row;
 mod icon;
-mod legend;
+mod layout;
 mod live;
 mod medal;
 mod menu_rows;
@@ -30,7 +36,9 @@ mod pace;
 mod plate;
 mod popover;
 mod reveal;
+mod scan_footer;
 mod scan_rows;
+mod scan_verdict;
 mod scrolling;
 mod scan_view;
 #[cfg(debug_assertions)]
@@ -40,19 +48,27 @@ mod settings_roots;
 mod settings_row;
 mod settings_view;
 mod settings_chrome;
-mod spray;
+mod settings_frame;
+#[cfg(debug_assertions)]
+mod smoke;
 mod startup;
 mod state;
+mod status;
+mod status_menu;
 mod style;
+mod surface;
 mod tasks;
 mod tasks_clean;
 mod theme;
+mod tile;
 mod trace;
 mod treemap;
 mod updater;
+mod usage_map;
 mod widgets;
+mod window;
+mod zone;
 
-use state::with_state_ret;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{define_class, msg_send, MainThreadOnly};
@@ -73,7 +89,15 @@ define_class!(
     impl MenuHandler {
         #[unsafe(method(togglePopover:))]
         fn toggle_popover(&self, _sender: &AnyObject) {
+            if status_menu::requested(self.mtm()) {
+                return status_menu::show(self.mtm());
+            }
             popover::toggle(self.mtm());
+        }
+
+        #[unsafe(method(openWindow:))]
+        fn open_window(&self, _sender: &AnyObject) {
+            window::open(self.mtm());
         }
 
         #[unsafe(method(handleToggleItem:))]
@@ -83,18 +107,12 @@ define_class!(
 
         #[unsafe(method(handleToggleGroup:))]
         fn handle_toggle_group(&self, sender: &NSButton) {
-            let index = (sender.tag() - scan_view::TAG_GROUP_BASE) as usize;
-            let Some(&group) = wd40::scanner::ArtifactGroup::ALL.get(index) else { return };
-            let intent = with_state_ret(|state| {
-                let was_empty = state.selected.is_empty();
-                let empty = state.empty_targets();
-                selection::toggle_group(&state.targets, &mut state.selected, group, &empty);
-                (was_empty, state.selected.is_empty())
-            }).unwrap_or((false, true));
-            tasks::reclaim_for_selection_intent(intent.0, intent.1);
-            if !live::selection_changed(self.mtm()) {
-                popover::refresh(self.mtm());
-            }
+            actions::toggle_group(sender.tag(), self.mtm());
+        }
+
+        #[unsafe(method(handleTickOld:))]
+        fn handle_tick_old(&self, _sender: &AnyObject) {
+            actions::tick_old(self.mtm());
         }
 
         #[unsafe(method(handleRevealItem:))]
@@ -126,11 +144,6 @@ define_class!(
         #[unsafe(method(handleDoneAck:))]
         fn handle_done_ack(&self, _sender: &AnyObject) {
             actions::done_ack(self.mtm());
-        }
-
-        #[unsafe(method(handleShowMore:))]
-        fn handle_show_more(&self, _sender: &AnyObject) {
-            actions::show_more(self.mtm());
         }
 
         #[unsafe(method(handleRescan:))]
@@ -168,6 +181,11 @@ define_class!(
         #[unsafe(method(settingsToggleMenuBarSize:))]
         fn settings_toggle_menu_bar_size(&self, _sender: &AnyObject) {
             actions::toggle_menu_bar_size(self.mtm());
+        }
+
+        #[unsafe(method(settingsToggleMenuBarColor:))]
+        fn settings_toggle_menu_bar_color(&self, _sender: &AnyObject) {
+            actions::toggle_menu_bar_color(self.mtm());
         }
 
         #[unsafe(method(settingsAddRoot:))]

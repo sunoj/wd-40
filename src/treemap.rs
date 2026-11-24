@@ -1,15 +1,19 @@
-// Squarified treemap of the targets a clean is working through: one tile per
-// target, tile area proportional to its bytes, laid out inside the crust region
-// the caller sizes against the volume.
-// Exports: `Tile`, tile state constants, `tiles`, `contains`, `rust_tone`.
-// Deps: crate::state, objc2_foundation geometry, wd40::disk.
+// Squarified treemap shared by the scan map and the cleaning plate: one cell per
+// entry, cell area proportional to its bytes, the long tail folded into one.
+// The same sizes in the same region always give the same cells, which is what
+// lets the scan map hand its picture to the cleaning plate unchanged.
+// Exports: `Cell`, `cells`, the tile state constants, `item_state`.
 
-use crate::state::{CleanItemStatus, CleanProgress};
+use crate::state::CleanItemStatus;
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 use wd40::disk::sum_bytes;
 
-/// Past this the tiles stop being readable, so the tail becomes a single tile.
-const MAX_TILES: usize = 14;
+/// Past this the cells stop being readable, so the tail becomes a single cell.
+const MAX_CELLS: usize = 40;
+/// Area a cell needs on average before it can be seen and pointed at.
+const CELL_AREA: f64 = 4200.0;
+
+/// Queued for removal, or ticked on the scan map.
 pub const PENDING: u8 = 0;
 pub const ACTIVE: u8 = 1;
 pub const DONE: u8 = 2;
@@ -18,69 +22,46 @@ pub const SKIPPED: u8 = 3;
 pub const PART_GONE: u8 = 4;
 /// Started, and none of it left the disk.
 pub const BLOCKED: u8 = 5;
+/// Not part of the job, or not ticked on the scan map.
+pub const IDLE: u8 = 6;
 
-pub struct Tile {
+pub struct Cell {
     pub rect: NSRect,
-    pub name: String,
-    pub size: u64,
-    pub state: u8,
+    /// Positions in the caller's list this cell stands for: one, or the tail.
+    pub members: Vec<usize>,
+    pub bytes: u64,
 }
 
-/// The largest targets each get a tile; the rest collapse into one, so a queue
-/// of sixty node_modules does not become sixty unreadable slivers. `region` is
-/// the share of the plate the crust is allowed to cover.
-pub fn tiles(p: &CleanProgress, region: NSRect) -> Vec<Tile> {
-    let mut order: Vec<usize> = (0..p.items.len()).collect();
-    order.sort_by(|a, b| p.items[*b].size_bytes.cmp(&p.items[*a].size_bytes));
-    let head = order.len().min(tile_cap(region));
-    let mut sizes: Vec<f64> = Vec::new();
-    let mut meta: Vec<(String, u64, u8)> = Vec::new();
-    for &index in &order[..head] {
-        let item = &p.items[index];
-        sizes.push(item.size_bytes.max(1) as f64);
-        meta.push((item.name.clone(), item.size_bytes, tile_state(item.status)));
+/// Lay `sizes` out in `region`, largest first. The largest entries each get a
+/// cell; the rest collapse into one, so sixty node_modules do not become sixty
+/// unreadable slivers.
+pub fn cells(sizes: &[u64], region: NSRect) -> Vec<Cell> {
+    let mut order: Vec<usize> = (0..sizes.len()).collect();
+    order.sort_by(|a, b| sizes[*b].cmp(&sizes[*a]));
+    let cap = ((region.size.width * region.size.height / CELL_AREA) as usize).clamp(3, MAX_CELLS);
+    let head = if order.len() > cap { cap - 1 } else { order.len() };
+    let mut groups: Vec<Vec<usize>> = order[..head].iter().map(|index| vec![*index]).collect();
+    if head < order.len() {
+        groups.push(order[head..].to_vec());
     }
-    if let Some(tail) = Some(&order[head..]).filter(|tail| !tail.is_empty()) {
-        let bytes = sum_bytes(tail.iter().map(|i| p.items[*i].size_bytes));
-        let states: Vec<u8> = tail.iter().map(|i| tile_state(p.items[*i].status)).collect();
-        let state = match (states.iter().all(|s| *s == DONE), states.iter().any(|s| *s != PENDING)) {
-            (true, _) => DONE,
-            (false, true) => ACTIVE,
-            _ => PENDING,
-        };
-        sizes.push(bytes.max(1) as f64);
-        meta.push((format!("{} smaller targets", tail.len()), bytes, state));
-    }
-    squarify(&sizes, region.size.width, region.size.height)
+    let bytes: Vec<u64> = groups.iter().map(|group| sum_bytes(group.iter().map(|i| sizes[*i]))).collect();
+    let areas: Vec<f64> = bytes.iter().map(|bytes| (*bytes).max(1) as f64).collect();
+    squarify(&areas, region.size.width, region.size.height)
         .into_iter()
-        .zip(meta)
-        .map(|(rect, (name, size, state))| Tile {
+        .zip(groups)
+        .zip(bytes)
+        .map(|((rect, members), bytes)| Cell {
             rect: NSRect::new(
                 NSPoint::new(rect.origin.x + region.origin.x, rect.origin.y + region.origin.y),
                 rect.size,
             ),
-            name,
-            size,
-            state,
+            members,
+            bytes,
         })
         .collect()
 }
 
-/// A tile needs roughly 20×14pt before it can be seen or pointed at, so a small
-/// crust carries fewer of them rather than a fan of slivers.
-fn tile_cap(region: NSRect) -> usize {
-    ((region.size.width * region.size.height / 500.0) as usize).clamp(3, MAX_TILES)
-}
-
-/// The four rust tones the mock cycles through, shared with the residue film.
-pub fn rust_tone(index: usize) -> (f64, f64, f64) {
-    const RUST: [(f64, f64, f64); 4] = [
-        (0.545, 0.333, 0.2), (0.486, 0.275, 0.149), (0.584, 0.337, 0.18), (0.635, 0.376, 0.227),
-    ];
-    RUST[index % RUST.len()]
-}
-
-fn tile_state(status: CleanItemStatus) -> u8 {
+pub fn item_state(status: CleanItemStatus) -> u8 {
     match status {
         CleanItemStatus::Pending => PENDING,
         CleanItemStatus::Active => ACTIVE,
@@ -151,7 +132,32 @@ fn worst(row: &[f64], side: f64, scale: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::squarify;
+    use super::{cells, squarify};
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+    /// The scan map and the cleaning plate lay the same targets out apart from
+    /// each other; the picture only carries over if they agree to the point.
+    #[test]
+    fn the_same_sizes_always_give_the_same_cells() {
+        let region = NSRect::new(NSPoint::new(7.0, 7.0), NSSize::new(520.0, 480.0));
+        let sizes = [900, 40, 400, 400, 7, 0, 120];
+        let (a, b) = (cells(&sizes, region), cells(&sizes, region));
+        assert_eq!(a.len(), sizes.len());
+        for (one, other) in a.iter().zip(&b) {
+            assert_eq!(one.members, other.members);
+            assert_eq!(one.rect, other.rect);
+        }
+        assert_eq!(a[0].members, vec![0]);
+    }
+
+    #[test]
+    fn a_long_tail_folds_into_one_cell() {
+        let region = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(120.0, 105.0));
+        let laid = cells(&[50, 40, 30, 20, 10, 5], region);
+        assert_eq!(laid.len(), 3);
+        assert_eq!(laid[2].members, vec![2, 3, 4, 5]);
+        assert_eq!(laid[2].bytes, 65);
+    }
 
     #[test]
     fn every_tile_keeps_its_share_of_the_area() {

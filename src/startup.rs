@@ -28,10 +28,11 @@ pub(crate) fn run() {
         targets: Vec::new(),
         measured: Default::default(),
         selected: Default::default(),
-        show_all: false,
+        open: Default::default(),
         screen: UiScreen::Scan,
         cleaning: None,
         done: None,
+        last_run: None,
         status_item,
         updater: Updater::start(),
         reclaim: None,
@@ -43,6 +44,9 @@ pub(crate) fn run() {
     if auto_hours > 0 {
         tasks::start_auto_clean(auto_hours);
     }
+
+    #[cfg(debug_assertions)]
+    crate::smoke::maybe_start();
 
     app.run();
 }

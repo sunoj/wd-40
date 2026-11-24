@@ -49,7 +49,7 @@ impl CleanItemStatus {
 
 #[derive(Clone)]
 pub struct CleanItem {
-    #[allow(dead_code)]
+    /// Position in `AppState::targets` of the target this item removes.
     pub index: usize,
     pub name: String,
     pub size_bytes: u64,
@@ -116,10 +116,13 @@ pub(crate) struct AppState {
     /// no figure yet and must never be drawn as though it had one.
     pub measured: HashSet<usize>,
     pub selected: HashSet<usize>,
-    pub show_all: bool,
+    /// The groups the user has unfolded, by key.
+    pub open: HashSet<&'static str>,
     pub screen: UiScreen,
     pub cleaning: Option<CleanProgress>,
     pub done: Option<DoneSummary>,
+    /// How the last clean ended, item by item: what the done screen's map shows.
+    pub last_run: Option<CleanProgress>,
     pub status_item: Retained<NSStatusItem>,
     pub updater: Option<Updater>,
     /// Device-byte accounting for the targets that can share blocks, once it
@@ -241,7 +244,7 @@ impl AppState {
 
     pub fn reset_selection(&mut self) {
         self.selected = default_selection(&self.targets, self.config.max_age_days);
-        self.show_all = false;
+        self.open.clear();
     }
 
     pub fn toggle_selected(&mut self, index: usize) {

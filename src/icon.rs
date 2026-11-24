@@ -23,16 +23,17 @@ const PAD: f64 = 22.0;
 /// Below the first rust step the tint is `labelColor`, which only tracks the
 /// menu bar correctly if AppKit resolves it at draw time — so there the glyph
 /// stays a template and macOS colours it. Once there is a rust tint to show,
-/// the colour is baked in and the template flag comes off.
+/// the colour is baked in and the template flag comes off. With `color` off
+/// the glyph is always the template.
 #[allow(deprecated)]
-pub fn rusty_icon(total_bytes: u64) -> Option<Retained<NSImage>> {
+pub fn rusty_icon(total_bytes: u64, color: bool) -> Option<Retained<NSImage>> {
     let scale = GLYPH_H / (VIEW_H + PAD * 2.0);
     let size = NSSize::new((VIEW_W + PAD * 2.0) * scale, GLYPH_H);
     let image = NSImage::initWithSize(NSImage::alloc(), size);
     let map = |x: f64, y: f64| {
         NSPoint::new((x - VIEW_X + PAD) * scale, GLYPH_H - (y - VIEW_Y + PAD) * scale)
     };
-    let rusted = total_bytes / (1024 * 1024 * 1024) >= 5;
+    let rusted = color && total_bytes / (1024 * 1024 * 1024) >= 5;
 
     image.lockFocus();
     if rusted {

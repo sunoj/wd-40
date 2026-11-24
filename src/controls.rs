@@ -131,8 +131,6 @@ pub enum CleanCta {
     /// Sizes are still arriving; nothing may be armed against numbers that are
     /// still moving.
     Measuring,
-    /// Nothing is ticked.
-    Empty,
     Ready { count: usize, size: String },
 }
 
@@ -140,7 +138,6 @@ impl CleanCta {
     fn title(&self) -> String {
         match self {
             Self::Measuring => "Measuring\u{2026}".into(),
-            Self::Empty => "Tick what to clean".into(),
             Self::Ready { count, .. } => format!("Clean {count} selected"),
         }
     }
@@ -158,6 +155,8 @@ impl CleanCta {
 }
 
 const CTA_H: f64 = 34.0;
+/// Knobs and ticks sit on a coloured ground in both appearances.
+pub const WHITE: (f64, f64, f64) = (1.0, 1.0, 1.0);
 const GLYPH: f64 = 13.0;
 const AFTER_GLYPH: f64 = 8.0;
 const BEFORE_SIZE: f64 = 10.0;
@@ -178,7 +177,14 @@ pub fn clean_button(
     mtm: MainThreadMarker,
 ) {
     let armed = cta.armed();
-    add_fill(parent, x, y, w, CTA_H, theme.ink, if armed { 1.0 } else { 0.28 }, 8.0, mtm);
+    // The label's yellow band with its navy print — and nothing but grey until
+    // there is something it would really remove.
+    // Unarmed it is a line of text in the button's place, not a grey slab: a
+    // slab that cannot be pressed reads as a button that has broken.
+    let ink = if armed { theme.cta_ink } else { theme.ink_3 };
+    if armed {
+        add_fill(parent, x, y, w, CTA_H, theme.cta, 1.0, 8.0, mtm);
+    }
     let title = cta.title();
     let title_w = fitted_width(&title, 13.5, false, mtm);
     let size_w = cta.size().map_or(0.0, |size| fitted_width(size, 12.5, true, mtm));
@@ -186,14 +192,14 @@ pub fn clean_button(
     let trail = cta.size().map_or(0.0, |_| BEFORE_SIZE + size_w);
     let mut cursor = x + ((w - (lead + title_w + trail)) / 2.0).max(0.0);
     if armed {
-        crate::widgets::symbol_view(parent, "trash", cursor, y + 10.0, GLYPH, theme.surface, mtm);
+        crate::widgets::symbol_view(parent, "trash", cursor, y + 10.0, GLYPH, ink, mtm);
         cursor += lead;
     }
-    crate::widgets::label(parent, &title, cursor, y + 8.0, title_w + 2.0, 18.0, 13.5, false, theme.surface, false, mtm);
+    crate::widgets::label(parent, &title, cursor, y + 8.0, title_w + 2.0, 18.0, 13.5, false, ink, false, mtm);
     if let Some(size) = cta.size() {
         cursor += title_w + BEFORE_SIZE;
-        let amount = crate::widgets::label(parent, size, cursor, y + 9.0, size_w + 2.0, 16.0, 12.5, false, theme.surface, true, mtm);
-        amount.setAlphaValue(0.62);
+        let amount = crate::widgets::label(parent, size, cursor, y + 9.0, size_w + 2.0, 16.0, 12.5, false, ink, true, mtm);
+        amount.setAlphaValue(0.7);
     }
     let button = unsafe {
         NSButton::buttonWithTitle_target_action(&NSString::from_str(""), Some(target), Some(action), mtm)
@@ -209,10 +215,10 @@ pub fn clean_button(
 /// row it sits in is the click target, so a second button under the pill would
 /// only be a smaller way to hit the same thing.
 pub fn pill(parent: &objc2_app_kit::NSView, on: bool, x: f64, y: f64, theme: &Theme, mtm: MainThreadMarker) {
-    let track = if on { theme.ink } else { theme.surface_3 };
+    let track = if on { theme.accent } else { theme.surface_3 };
     add_fill(parent, x, y, 38.0, 22.0, track, 1.0, 11.0, mtm);
     let knob_x = if on { x + 18.0 } else { x + 2.0 };
-    add_fill(parent, knob_x, y + 2.0, 18.0, 18.0, theme.surface, 1.0, 9.0, mtm);
+    add_fill(parent, knob_x, y + 2.0, 18.0, 18.0, WHITE, 1.0, 9.0, mtm);
 }
 
 /// Keep-days NSSlider (0–30) matching the mock safety control.

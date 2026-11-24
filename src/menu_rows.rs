@@ -1,14 +1,13 @@
 // Group planning for popover scan lists: which rows fit within a visible budget.
-// Exports: `GroupPlan`, `RowPlan`, `Membership`, `plan_groups`. Pure — no AppKit.
+// Exports: `GroupPlan`, `RowPlan`, `Fold`, `Membership`, `plan_groups`. Pure — no AppKit.
 // Deps: crate::names, wd40::{disk, scanner}.
 
 use crate::names::display_names;
+use crate::selection::is_recent;
 use std::collections::HashSet;
 use wd40::disk::sum_bytes;
 use wd40::scanner::{ArtifactGroup, TargetDir};
 
-/// Rows a non-empty group keeps even when the list is over budget.
-const FLOOR_PER_GROUP: usize = 3;
 
 /// One project row, resolved down to what the popover draws.
 pub struct RowPlan<'a> {
@@ -26,8 +25,60 @@ pub struct GroupPlan<'a> {
     pub rows: Vec<RowPlan<'a>>,
     pub count: usize,
     /// Rows this group has but the budget could not fit.
-    pub hidden: usize,
+    /// Old targets past the group's row budget, folded behind the link.
+    pub more: usize,
+    /// Recent targets, which the popover folds away whole.
+    pub recent: usize,
     pub size: u64,
+}
+
+/// How a group's rows are folded. The popover shows a few of each group's old
+/// targets until its header is clicked; the window shows everything.
+#[derive(Clone, Copy)]
+pub struct Fold {
+    /// Most rows a folded group shows. Per group, not shared: a shared budget
+    /// left most groups with no rows at all once there were six of them.
+    pub per_group: usize,
+    /// "Keep builds newer than": targets newer than this fold away as recent,
+    /// and an open group lists them after its old ones.
+    pub keep_days: Option<u64>,
+    /// Groups unfolded whole, in `ArtifactGroup::ALL` order.
+    pub open: [bool; ArtifactGroup::ALL.len()],
+}
+
+impl Fold {
+    pub fn all() -> Self {
+        Self { per_group: usize::MAX, keep_days: None, open: [true; ArtifactGroup::ALL.len()] }
+    }
+
+    /// Every group folded to `per_group` of its old rows.
+    pub fn folded(per_group: usize, keep_days: Option<u64>) -> Self {
+        Self { per_group, keep_days, open: [false; ArtifactGroup::ALL.len()] }
+    }
+
+    fn is_open(&self, group: ArtifactGroup) -> bool {
+        ArtifactGroup::ALL.iter().position(|g| *g == group).is_none_or(|at| self.open[at])
+    }
+
+    fn is_old(&self, target: &TargetDir) -> bool {
+        self.keep_days.is_none_or(|days| !is_recent(target, days))
+    }
+
+    /// A group's rows. Folded, they are its first few old targets. Open, they
+    /// are every target, old ones first, so unfolding moves no row on show.
+    fn shown<'a>(&self, group: ArtifactGroup, found: &[(usize, &'a TargetDir)]) -> Vec<(usize, &'a TargetDir)> {
+        let (aged, young): (Vec<_>, Vec<_>) = found.iter().copied().partition(|(_, td)| self.is_old(td));
+        match self.is_open(group) {
+            true => aged.into_iter().chain(young).collect(),
+            false => aged.into_iter().take(self.per_group).collect(),
+        }
+    }
+}
+
+impl<'a> GroupPlan<'a> {
+    pub fn hidden(&self) -> usize {
+        self.more + self.recent
+    }
 }
 
 /// The visible row set and the group counts it was planned from. A later open
@@ -40,8 +91,8 @@ pub struct Membership {
 }
 
 impl Membership {
-    pub fn of(targets: &[TargetDir], empty: &HashSet<usize>, limit: usize) -> Self {
-        let plans = plan_groups(targets, empty, limit);
+    pub fn of(targets: &[TargetDir], empty: &HashSet<usize>, fold: Fold) -> Self {
+        let plans = plan_groups(targets, empty, fold);
         Self {
             rows: plans.iter().flat_map(|p| p.rows.iter().map(|r| r.index)).collect(),
             counts: plans.iter().map(|p| (p.group, p.count)).collect(),
@@ -68,7 +119,7 @@ impl std::fmt::Debug for Membership {
 pub fn plan_groups<'a>(
     targets: &'a [TargetDir],
     empty: &HashSet<usize>,
-    limit: usize,
+    fold: Fold,
 ) -> Vec<GroupPlan<'a>> {
     let names = display_names(targets);
     let members: Vec<(ArtifactGroup, Vec<(usize, &TargetDir)>)> = ArtifactGroup::ALL
@@ -84,17 +135,19 @@ pub fn plan_groups<'a>(
         .filter(|(_, found)| !found.is_empty())
         .collect();
 
-    let quota = allocate(&members.iter().map(|(_, m)| m.len()).collect::<Vec<_>>(), limit);
-
     members
         .into_iter()
-        .zip(quota)
-        .map(|((group, found), visible)| {
+        .map(|(group, found)| {
+            let old = |td: &TargetDir| fold.is_old(td);
+            let shown = fold.shown(group, &found);
+            // What the header's mark stands for: every member that is not a row.
+            let folded: Vec<&TargetDir> =
+                found.iter().filter(|(i, _)| !shown.iter().any(|(s, _)| s == i)).map(|(_, td)| *td).collect();
+            let more = folded.iter().filter(|td| old(td)).count();
             let first_kind = found[0].1.kind.label();
             let mixed = found.iter().any(|(_, td)| td.kind.label() != first_kind);
-            let rows: Vec<RowPlan> = found
+            let rows: Vec<RowPlan> = shown
                 .iter()
-                .take(visible)
                 .map(|&(index, target)| RowPlan {
                     index,
                     target,
@@ -105,7 +158,8 @@ pub fn plan_groups<'a>(
             GroupPlan {
                 group,
                 count: found.len(),
-                hidden: found.len() - rows.len(),
+                more,
+                recent: folded.len() - more,
                 size: sum_bytes(found.iter().map(|(_, td)| td.size_bytes)),
                 rows,
             }
@@ -113,156 +167,6 @@ pub fn plan_groups<'a>(
         .collect()
 }
 
-fn allocate(sizes: &[usize], limit: usize) -> Vec<usize> {
-    let mut quota: Vec<usize> = sizes.iter().map(|&n| n.min(FLOOR_PER_GROUP)).collect();
-    let mut spent: usize = quota.iter().sum();
-    while spent > limit {
-        let Some(slot) = quota.iter_mut().rev().find(|left| **left > 0) else { break };
-        *slot -= 1;
-        spent -= 1;
-    }
-    for (index, &size) in sizes.iter().enumerate() {
-        let extra = (size - quota[index]).min(limit.saturating_sub(spent));
-        quota[index] += extra;
-        spent += extra;
-    }
-    quota
-}
-
 #[cfg(test)]
-mod tests {
-    use super::{allocate, plan_groups, Membership};
-    use std::collections::HashSet;
-    use std::path::PathBuf;
-    use std::time::SystemTime;
-    use wd40::scanner::{ArtifactKind, TargetDir};
-
-    fn target(path: &str, kind: ArtifactKind, size: u64) -> TargetDir {
-        TargetDir {
-            path: PathBuf::from(path),
-            size_bytes: size,
-            last_modified: SystemTime::UNIX_EPOCH,
-            kind,
-        }
-    }
-
-    #[test]
-    fn the_row_limit_is_shared_across_groups() {
-        let targets = vec![
-            target("/w/a/target", ArtifactKind::RustTarget, 9),
-            target("/w/b/target", ArtifactKind::RustTarget, 8),
-            target("/w/c/node_modules", ArtifactKind::NodeModules, 7),
-        ];
-        let plans = plan_groups(&targets, &HashSet::new(), 2);
-        assert_eq!(plans[0].rows.len(), 2);
-        assert_eq!(plans[0].hidden, 0);
-        assert_eq!(plans[1].rows.len(), 0);
-        assert_eq!(plans[1].hidden, 1);
-        assert_eq!(plans[1].count, 1);
-    }
-
-    #[test]
-    fn a_small_group_keeps_its_floor_against_a_crowded_one() {
-        assert_eq!(allocate(&[17, 3], 15), [12, 3]);
-    }
-
-    #[test]
-    fn allocation_never_hands_out_more_than_the_limit() {
-        for sizes in [vec![20], vec![9, 9, 9], vec![1, 1], vec![0, 40, 2]] {
-            let quota = allocate(&sizes, 15);
-            assert!(quota.iter().sum::<usize>() <= 15, "{sizes:?} -> {quota:?}");
-            for (given, &available) in quota.iter().zip(sizes.iter()) {
-                assert!(given <= &available, "{sizes:?} -> {quota:?}");
-            }
-        }
-    }
-
-    #[test]
-    fn a_target_that_measures_empty_changes_membership() {
-        let targets = vec![
-            target("/w/a/target", ArtifactKind::RustTarget, 9),
-            target("/w/b/target", ArtifactKind::RustTarget, 4),
-        ];
-        let before = Membership::of(&targets, &HashSet::new(), 10);
-        let after = Membership::of(&targets, &HashSet::from([1]), 10);
-        assert_ne!(before, after);
-        assert_eq!(after, Membership::of(&targets[..1], &HashSet::new(), 10));
-    }
-
-    #[test]
-    fn membership_ignores_how_old_a_target_is() {
-        let now = SystemTime::now();
-        let young = TargetDir {
-            path: PathBuf::from("/w/a/target"),
-            size_bytes: 9,
-            last_modified: now,
-            kind: ArtifactKind::RustTarget,
-        };
-        let old = TargetDir {
-            last_modified: now
-                .checked_sub(std::time::Duration::from_secs(3 * 86_400))
-                .unwrap_or(SystemTime::UNIX_EPOCH),
-            ..young.clone()
-        };
-        assert_eq!(
-            Membership::of(&[young], &HashSet::new(), 10),
-            Membership::of(&[old], &HashSet::new(), 10),
-        );
-    }
-
-    #[test]
-    fn a_nonzero_size_leaves_membership_alone() {
-        let unmeasured = vec![
-            target("/w/a/target", ArtifactKind::RustTarget, 0),
-            target("/w/b/target", ArtifactKind::RustTarget, 8),
-        ];
-        let settled = vec![
-            target("/w/a/target", ArtifactKind::RustTarget, 12),
-            target("/w/b/target", ArtifactKind::RustTarget, 8),
-        ];
-        assert_eq!(
-            Membership::of(&unmeasured, &HashSet::new(), 10),
-            Membership::of(&settled, &HashSet::new(), 10),
-        );
-    }
-
-    #[test]
-    fn a_hidden_empty_target_still_changes_the_count() {
-        let targets: Vec<TargetDir> = (0..7)
-            .map(|i| target(&format!("/w/{i}/target"), ArtifactKind::RustTarget, 10 - i as u64))
-            .collect();
-        let before = Membership::of(&targets, &HashSet::new(), 6);
-        let after = Membership::of(&targets, &HashSet::from([6]), 6);
-        assert_ne!(before, after);
-        assert_eq!(after, Membership::of(&targets[..6], &HashSet::new(), 6));
-    }
-
-    /// A row that frees nothing is not a row, and the count says so — the
-    /// figure beside the group title is what the list can show, not what the
-    /// scan happened to walk past.
-    #[test]
-    fn an_empty_target_leaves_the_rows_and_the_count() {
-        let targets = vec![
-            target("/w/a/target", ArtifactKind::RustTarget, 9),
-            target("/w/b/target", ArtifactKind::RustTarget, 0),
-        ];
-        let plans = plan_groups(&targets, &HashSet::from([1]), 10);
-        assert_eq!(plans[0].rows.len(), 1);
-        assert_eq!(plans[0].rows[0].index, 0);
-        assert_eq!(plans[0].count, 1);
-        assert_eq!(plans[0].hidden, 0);
-        assert_eq!(plans[0].size, 9);
-    }
-
-    #[test]
-    fn a_group_of_one_kind_leaves_the_kind_suffix_off() {
-        let targets = vec![
-            target("/w/a/target", ArtifactKind::RustTarget, 9),
-            target("/tmp/cc-target-b", ArtifactKind::TmpTarget, 8),
-        ];
-        let mixed = plan_groups(&targets, &HashSet::new(), 10);
-        assert_eq!(mixed[0].rows[0].kind, "target");
-        let single = plan_groups(&targets[..1], &HashSet::new(), 10);
-        assert_eq!(single[0].rows[0].kind, "");
-    }
-}
+#[path = "menu_rows_tests.rs"]
+mod tests;

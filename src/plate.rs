@@ -1,45 +1,55 @@
-// The cleaning screen's plate: brushed steel under a rust crust, and a WD-40
-// nozzle that works it — by itself while the job runs, from the pointer for as
-// long as the pointer is on the plate. A tile clears only when its target is
-// really gone. Exports: `plate_view`. Deps: crate::{can, crust, drift, spray}.
+// The cleaning plate: steel painted once, the job's tiles over it, and the can.
+// Removals are played one at a time — the can crosses to a tile, the tile comes
+// up off the steel — so each is seen in full however fast the deletes land. A
+// tile is queued only once its target has really gone: the plate may run behind
+// the job, never ahead of it. Exports: `plate_view`, `PlateView`.
 
-use crate::can::draw_nozzle;
-use crate::crust::{paint_plate, plate_edge};
-use crate::legend::{idle_text, legend_text, worked_name};
-use crate::drift::{start_clock, stop_clock, ticking, Drift};
+use crate::can::{can_view, CanView, SPRAY};
+use crate::choreo::{can_origin, centre, drain_seconds, home, pace, LIFT, TRAVEL};
+use crate::crust::paint_steel;
 use crate::metal::reduce_motion;
-use crate::spray::{wipe, Mist};
+use crate::motion;
 use crate::state::CleanProgress;
-use crate::treemap::{contains, tiles, Tile, DONE};
-use crate::widgets::retrack;
+use crate::tile::{tile_view, Patch, TileView};
+use crate::treemap::{item_state, ACTIVE, DONE, IDLE, PENDING};
+use crate::widgets::add_fill;
 use objc2::rc::Retained;
-use objc2::runtime::AnyObject;
+use objc2::runtime::{AnyObject, Sel};
 use objc2::{define_class, msg_send, sel, DefinedClass, MainThreadOnly};
-use objc2_app_kit::{NSEvent, NSTextField, NSTrackingAreaOptions, NSView};
-use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSString};
-use std::cell::{Cell, RefCell};
+use objc2_app_kit::{NSBox, NSTextField, NSView};
+use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSString, NSTimer};
+use std::cell::{Cell, OnceCell, RefCell};
+use std::collections::VecDeque;
+
+/// Diameter of the burst of spray over a tile as it starts to lift.
+const PUFF: f64 = 46.0;
+
+/// How many times the steel has been painted, so a debug run can show that a
+/// whole clean costs one paint of it and not one per frame.
+#[cfg(debug_assertions)]
+pub static STEEL_PAINTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// The views laid on the steel, made after the plate they are added to.
+struct Laid {
+    tiles: Vec<Retained<TileView>>,
+    can: Retained<CanView>,
+    puff: Retained<NSBox>,
+}
 
 pub struct PlateIvars {
-    /// Replaced in place as the run advances. Rebuilding the whole view for
-    /// each tile that comes off took the hover and the spray in flight with it.
-    tiles: RefCell<Vec<Tile>>,
-    hover: Cell<isize>,
-    /// Tile names live under the plate, not on it: small tiles have no room.
-    legend: Retained<NSTextField>,
+    /// The tiles as planned, fixed for the run. `members` are slots in the
+    /// job's item list; a tile with none is not part of the job.
+    patches: Vec<Patch>,
     /// How much of the volume this job is, fixed for the run.
     share: String,
-    idle: RefCell<String>,
+    /// Figures live under the plate, not on it: small tiles have no room.
+    legend: Retained<NSTextField>,
     dark: bool,
-    /// Reduce Motion: the wipe still lands, nothing ever moves on its own.
-    still: bool,
-    pointer: Cell<NSPoint>,
-    inside: Cell<bool>,
-    held: Cell<bool>,
-    mist: RefCell<Mist>,
-    /// True while the job still has targets to work through. The spray runs
-    /// itself for exactly that long, and this is read from the job's state.
-    working: Cell<bool>,
-    drift: RefCell<Drift>,
+    laid: OnceCell<Laid>,
+    /// Tiles whose targets have really gone and whose lift is still to play.
+    queue: RefCell<VecDeque<usize>>,
+    /// True from the can setting off until its tile has finished lifting.
+    playing: Cell<bool>,
 }
 
 define_class!(
@@ -52,247 +62,229 @@ define_class!(
     impl PlateView {
         #[unsafe(method(drawRect:))]
         fn draw_rect(&self, _dirty: NSRect) {
-            self.paint();
-            // The plate is on screen and drawing, which is the one moment it is
-            // certain the clock may run; from here on the clock draws itself.
-            self.wake();
+            #[cfg(debug_assertions)]
+            STEEL_PAINTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let footprints: Vec<NSRect> = self.ivars().patches.iter().map(|patch| patch.rect).collect();
+            paint_steel(self.bounds(), self.ivars().dark, &footprints);
         }
 
-        #[unsafe(method(mouseEntered:))]
-        fn mouse_entered(&self, event: &NSEvent) {
-            self.track(event);
+        /// The can has arrived: its tile comes off.
+        #[unsafe(method(liftTick:))]
+        fn lift_tick(&self, _timer: *mut AnyObject) {
+            let Some(laid) = self.ivars().laid.get() else { return };
+            let Some(index) = self.ivars().queue.borrow_mut().pop_front() else { return self.rest() };
+            let tile = &laid.tiles[index];
+            let aim = centre(tile.frame());
+            laid.puff.setFrameOrigin(NSPoint::new(aim.x - PUFF / 2.0, aim.y - PUFF / 2.0));
+            motion::puff(&laid.puff);
+            tile.mark_gone();
+            let seconds = LIFT * pace(self.waiting());
+            motion::lift(tile, seconds);
+            self.after(seconds, sel!(nextTick:));
         }
 
-        #[unsafe(method(mouseMoved:))]
-        fn mouse_moved(&self, event: &NSEvent) {
-            self.track(event);
-        }
-
-        #[unsafe(method(mouseDown:))]
-        fn mouse_down(&self, event: &NSEvent) {
-            self.track(event);
-            self.ivars().held.set(true);
-            self.burst(self.ivars().pointer.get());
-        }
-
-        #[unsafe(method(mouseDragged:))]
-        fn mouse_dragged(&self, event: &NSEvent) {
-            self.track(event);
-            self.burst(self.ivars().pointer.get());
-        }
-
-        #[unsafe(method(mouseUp:))]
-        fn mouse_up(&self, _event: &NSEvent) {
-            self.ivars().held.set(false);
-            self.setNeedsDisplay(true);
-        }
-
-        #[unsafe(method(mouseExited:))]
-        fn mouse_exited(&self, _event: &NSEvent) {
-            let ivars = self.ivars();
-            ivars.inside.set(false);
-            ivars.held.set(false);
-            ivars.hover.set(-1);
-            // Hand back where the pointer left it, not where the job is.
-            ivars.drift.borrow_mut().resume_from(ivars.pointer.get());
-            self.refresh_legend();
-            self.setNeedsDisplay(true);
-        }
-
-        #[unsafe(method(sprayTick:))]
-        fn spray_tick(&self, _timer: *mut AnyObject) {
-            let ivars = self.ivars();
-            if !self.on_screen() {
-                ivars.held.set(false);
-                return stop_clock();
-            }
-            if ivars.working.get() {
-                // Where the nozzle waits when the job has nothing to aim it at.
-                let size = self.bounds().size;
-                let home = NSPoint::new(size.width / 2.0, size.height / 2.0);
-                let tiles = ivars.tiles.borrow();
-                ivars.drift.borrow_mut().step(&tiles, home);
-            }
-            if self.spray_on() {
-                let point = ivars.mist.borrow_mut().wobble(self.nozzle(), 5.0);
-                self.burst(point);
-            }
-            let alive = ivars.mist.borrow_mut().step();
-            if !alive && !self.spray_on() {
-                stop_clock();
-            }
-            self.setNeedsDisplay(true);
-        }
-
-        /// A closed popover takes its window with it, and a view with no window
-        /// on screen must never keep a 50 Hz timer alive.
-        #[unsafe(method(viewDidMoveToWindow))]
-        fn view_did_move_to_window(&self) {
-            if !self.on_screen() {
-                self.ivars().inside.set(false);
-                self.ivars().held.set(false);
-                stop_clock();
-            }
-        }
-
-        #[unsafe(method(acceptsFirstMouse:))]
-        fn accepts_first_mouse(&self, _event: *mut NSEvent) -> bool {
-            true
-        }
-
-        #[unsafe(method(updateTrackingAreas))]
-        fn update_tracking_areas(&self) {
-            unsafe {
-                let _: () = msg_send![super(self), updateTrackingAreas];
-            }
-            retrack(self, NSTrackingAreaOptions::MouseMoved);
+        /// That lift has played in full; the next one may start.
+        #[unsafe(method(nextTick:))]
+        fn next_tick(&self, _timer: *mut AnyObject) {
+            self.rest();
         }
     }
 );
 
 impl PlateView {
-    fn paint(&self) {
-        let bounds = self.bounds();
+    /// Take the run's new state. Progress hops are coalesced, so any number of
+    /// tiles may have changed. A target that has gone joins the queue of lifts;
+    /// every other change shows at once, since none of them claims a removal.
+    pub fn update(&self, progress: &CleanProgress) {
         let ivars = self.ivars();
-        let tiles = ivars.tiles.borrow();
-        paint_plate(bounds, ivars.dark, &tiles, ivars.hover.get());
-        // Placed before the can so the can can be told to keep off it, drawn
-        // after the can so nothing at all can cover the name.
-        let mut name = worked_name(bounds, &tiles, ivars.dark);
-        drop(tiles);
-        ivars.mist.borrow().draw();
-        if ivars.inside.get() || self.moving() {
-            draw_nozzle(self.nozzle(), self.spray_on(), bounds, name.as_mut());
-        }
-        if let Some(name) = &name {
-            name.draw();
-        }
-        plate_edge(bounds);
-    }
-
-    /// Take the run's new state without rebuilding the view.
-    pub fn update(&self, progress: &CleanProgress, crust: NSRect) {
-        let ivars = self.ivars();
-        let before: Vec<u8> = ivars.tiles.borrow().iter().map(|tile| tile.state).collect();
-        let fresh = tiles(progress, crust);
-        // Ground a target has just really left is what the nozzle works next.
-        // The aim is read off the job; nothing here moves the job along.
-        for (index, tile) in fresh.iter().enumerate() {
-            if tile.state == DONE && before.get(index).is_some_and(|state| *state != DONE) {
-                ivars.drift.borrow_mut().cleared(index);
+        let Some(laid) = ivars.laid.get() else { return };
+        for (index, (patch, tile)) in ivars.patches.iter().zip(&laid.tiles).enumerate() {
+            let real = patch_state(patch, progress);
+            if real == tile.state() || ivars.queue.borrow().contains(&index) {
+                continue;
+            }
+            match real {
+                DONE if reduce_motion() => {
+                    tile.mark_gone();
+                    tile.setAlphaValue(0.0);
+                }
+                DONE => ivars.queue.borrow_mut().push_back(index),
+                _ => tile.show(real),
             }
         }
-        *ivars.tiles.borrow_mut() = fresh;
-        ivars.working.set(progress.working());
-        *ivars.idle.borrow_mut() = idle_text(&ivars.share, progress);
-        let hover = ivars.hover.get();
-        if usize::try_from(hover).is_ok_and(|index| index >= ivars.tiles.borrow().len()) {
-            ivars.hover.set(-1);
-        }
-        self.refresh_legend();
-        self.setNeedsDisplay(true);
+        self.show_legend(progress);
+        self.play();
     }
 
-    /// True while the plate is performing: with Reduce Motion on it never is.
-    fn moving(&self) -> bool {
-        self.ivars().working.get() && !self.ivars().still
+    /// Seconds until every queued lift has played, for whoever is waiting to
+    /// leave this screen.
+    pub fn seconds_left(&self) -> f64 {
+        let waiting = self.waiting();
+        drain_seconds(waiting) + if self.ivars().playing.get() { TRAVEL + LIFT } else { 0.0 }
     }
 
-    /// True while spray is coming out: the whole time the job is working, and
-    /// under the hand while the button is down.
-    fn spray_on(&self) -> bool {
-        self.moving() || self.ivars().held.get()
+    fn waiting(&self) -> usize {
+        self.ivars().queue.borrow().len()
     }
 
-    /// Where the can is: the pointer takes it over for as long as it is on the
-    /// plate, and the automatic path has it back the moment the pointer leaves.
-    fn nozzle(&self) -> NSPoint {
+    /// Start the next lift, unless one is playing or none is waiting.
+    fn play(&self) {
         let ivars = self.ivars();
-        match ivars.inside.get() {
-            true => ivars.pointer.get(),
-            false => ivars.drift.borrow().point(),
-        }
-    }
-
-    fn on_screen(&self) -> bool {
-        self.window().is_some_and(|window| window.isVisible())
-    }
-
-    /// Run the clock while something still has to move. Called only from a
-    /// draw, so the plate is on screen by then; a view with no window at all is
-    /// a closed or rebuilt screen. Reduce Motion never starts it — a rub still
-    /// wipes, straight off the mouse events.
-    fn wake(&self) {
-        if self.ivars().still || ticking() || !self.spray_on() || self.window().is_none() {
+        let (Some(laid), Some(index)) = (ivars.laid.get(), ivars.queue.borrow().front().copied()) else { return };
+        if ivars.playing.replace(true) {
             return;
         }
+        let seconds = TRAVEL * pace(self.waiting());
+        let to = can_origin(centre(laid.tiles[index].frame()), self.bounds());
+        motion::travel(&laid.can, NSRect::new(to, laid.can.frame().size), seconds);
+        self.after(seconds, sel!(liftTick:));
+    }
+
+    fn rest(&self) {
+        self.ivars().playing.set(false);
+        // A plate that has left the screen has nobody to play to.
+        match self.window().is_some() {
+            true => self.play(),
+            false => self.ivars().queue.borrow_mut().clear(),
+        }
+    }
+
+    /// One shot, once per step of a lift: there is no per-frame clock.
+    fn after(&self, seconds: f64, selector: Sel) {
         let target: &AnyObject = unsafe { &*(self as *const Self as *const AnyObject) };
-        start_clock(target, sel!(sprayTick:));
-    }
-
-    /// One puff: wipe what the nozzle covers, then throw off mist.
-    fn burst(&self, point: NSPoint) {
-        let ivars = self.ivars();
-        wipe(point, self.bounds(), &ivars.tiles.borrow());
-        if !ivars.still {
-            ivars.mist.borrow_mut().emit(point);
+        unsafe {
+            NSTimer::scheduledTimerWithTimeInterval_target_selector_userInfo_repeats(seconds, target, selector, None, false);
         }
-        self.setNeedsDisplay(true);
     }
 
-    fn track(&self, event: &NSEvent) {
-        let ivars = self.ivars();
-        let point = self.convertPoint_fromView(event.locationInWindow(), None);
-        ivars.pointer.set(point);
-        ivars.inside.set(true);
-        let hit = ivars
-            .tiles
-            .borrow()
+    fn show_legend(&self, progress: &CleanProgress) {
+        let text = format!("{} \u{00b7} {}/{} clear", self.ivars().share, progress.done_count, progress.total_count);
+        self.ivars().legend.setStringValue(&NSString::from_str(&text));
+    }
+
+    /// Lay the tiles, the puff and the can over the steel in their settled
+    /// pose for `progress`. Nothing is animated here.
+    fn lay(&self, progress: &CleanProgress, mtm: MainThreadMarker) {
+        let bounds = self.bounds();
+        let patches = &self.ivars().patches;
+        let tiles: Vec<Retained<TileView>> = patches
             .iter()
-            .position(|tile| contains(tile.rect, point))
-            .map_or(-1, |index| index as isize);
-        if hit != ivars.hover.get() {
-            ivars.hover.set(hit);
-            self.refresh_legend();
+            .enumerate()
+            .map(|(index, patch)| tile_view(index, patch, patch_state(patch, progress), mtm))
+            .collect();
+        for tile in &tiles {
+            self.addSubview(tile);
         }
-        self.setNeedsDisplay(true);
+        let puff = add_fill(self, 0.0, 0.0, PUFF, PUFF, (1.0, 1.0, 1.0), 1.0, PUFF / 2.0, mtm);
+        puff.setAlphaValue(0.0);
+        // The can rests on the largest ground already cleared, if any has been.
+        let cleared = tiles.iter().find(|tile| tile.state() == DONE).map(|tile| centre(tile.frame()));
+        let can = can_view(SPRAY, can_origin(cleared.unwrap_or(home(bounds)), bounds), mtm);
+        self.addSubview(&can);
+        let _ = self.ivars().laid.set(Laid { tiles, can, puff });
     }
 
-    fn refresh_legend(&self) {
-        let ivars = self.ivars();
-        let text = legend_text(&ivars.tiles.borrow(), ivars.hover.get(), &ivars.idle.borrow());
-        ivars.legend.setStringValue(&NSString::from_str(&text));
+    /// Where the render tree has each tile right now — alpha, then the corner
+    /// of its frame — and the can. Read off the presentation layers, which is
+    /// what is on screen mid-animation.
+    #[cfg(debug_assertions)]
+    pub fn sample(&self) -> String {
+        let shown = |view: &NSView| -> (f32, NSRect) {
+            unsafe {
+                let layer: *mut AnyObject = msg_send![view, layer];
+                if layer.is_null() {
+                    return (-1.0, view.frame());
+                }
+                let live: *mut AnyObject = msg_send![layer, presentationLayer];
+                let from = if live.is_null() { layer } else { live };
+                (msg_send![from, opacity], msg_send![from, frame])
+            }
+        };
+        let Some(laid) = self.ivars().laid.get() else { return String::new() };
+        let tiles: Vec<String> = laid.tiles.iter().map(|tile| {
+            let (alpha, frame) = shown(tile);
+            format!("{alpha:.2}@{:.0},{:.0}", frame.origin.x, frame.origin.y)
+        }).collect();
+        let (_, can) = shown(&laid.can);
+        let lifted = laid.tiles.iter().filter(|tile| tile.state() == DONE).count();
+        format!("lifted={lifted} can {:.0},{:.0} tiles [{}]", can.origin.x, can.origin.y, tiles.join(" "))
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+/// What a tile should show for the job as it really stands. A tile shared by
+/// the tail is gone only when every target in it is; one that also stands for
+/// a target outside the job goes faint when the job's part is done, and stays.
+fn patch_state(patch: &Patch, progress: &CleanProgress) -> u8 {
+    let states: Vec<u8> = patch.members.iter().filter_map(|slot| progress.items.get(*slot)).map(|item| item_state(item.status)).collect();
+    let whole = match states.as_slice() {
+        [] => IDLE,
+        [one] => *one,
+        all if all.iter().all(|state| *state == DONE) => DONE,
+        all if all.iter().all(|state| *state == PENDING) => PENDING,
+        all if all.iter().any(|state| *state == ACTIVE || *state == PENDING) => ACTIVE,
+        all => *all.iter().find(|state| **state != DONE).unwrap_or(&DONE),
+    };
+    if patch.held && whole == DONE { IDLE } else { whole }
+}
+
+/// The plate in its settled pose for `progress`: built from the state alone,
+/// so what it shows never depends on an animation having finished.
 pub fn plate_view(
     frame: NSRect,
+    patches: Vec<Patch>,
     progress: &CleanProgress,
-    crust: NSRect,
-    legend: Retained<NSTextField>,
     share: String,
+    legend: Retained<NSTextField>,
     dark: bool,
     mtm: MainThreadMarker,
 ) -> Retained<PlateView> {
-    stop_clock();
-    let home = NSPoint::new(frame.size.width / 2.0, frame.size.height / 2.0);
     let view = mtm.alloc::<PlateView>().set_ivars(PlateIvars {
-        tiles: RefCell::new(tiles(progress, crust)),
-        hover: Cell::new(-1),
-        legend,
-        idle: RefCell::new(idle_text(&share, progress)),
+        patches,
         share,
+        legend,
         dark,
-        still: reduce_motion(),
-        pointer: Cell::new(NSPoint::new(-100.0, -100.0)),
-        inside: Cell::new(false),
-        held: Cell::new(false),
-        mist: RefCell::new(Mist::default()),
-        working: Cell::new(progress.working()),
-        drift: RefCell::new(Drift::new(home)),
+        laid: OnceCell::new(),
+        queue: RefCell::new(VecDeque::new()),
+        playing: Cell::new(false),
     });
     let view: Retained<PlateView> = unsafe { msg_send![super(view), initWithFrame: frame] };
-    view.refresh_legend();
+    // Layer-backed, so a tile lifting or the can crossing is composited from
+    // what was already painted and the steel under them is never redrawn.
+    view.setWantsLayer(true);
+    view.lay(progress, mtm);
+    view.show_legend(progress);
     view
+}
+
+#[cfg(test)]
+mod tests {
+    use super::patch_state;
+    use crate::state::{CleanItem, CleanItemStatus, CleanProgress};
+    use crate::tile::Patch;
+    use crate::treemap::{ACTIVE, DONE, IDLE};
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+    fn patch(members: Vec<usize>, held: bool) -> Patch {
+        let rect = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(10.0, 10.0));
+        Patch { rect, members, held, name: String::new(), path: String::new(), bytes: 1, tone: (0.0, 0.0, 0.0) }
+    }
+
+    fn run(statuses: &[CleanItemStatus]) -> CleanProgress {
+        let items = statuses
+            .iter()
+            .enumerate()
+            .map(|(index, status)| CleanItem { index, name: String::new(), size_bytes: 1, freed_bytes: 0, status: *status })
+            .collect();
+        CleanProgress { items, ..Default::default() }
+    }
+
+    #[test]
+    fn a_shared_tile_lifts_only_when_everything_in_it_has_gone() {
+        use CleanItemStatus::{Done, Pending};
+        assert_eq!(patch_state(&patch(vec![0, 1], false), &run(&[Done, Pending])), ACTIVE);
+        assert_eq!(patch_state(&patch(vec![0, 1], false), &run(&[Done, Done])), DONE);
+        // One of its targets is not in the job at all: it stays on the plate.
+        assert_eq!(patch_state(&patch(vec![0, 1], true), &run(&[Done, Done])), IDLE);
+        assert_eq!(patch_state(&patch(vec![], false), &run(&[Done])), IDLE);
+    }
 }

@@ -1,8 +1,8 @@
-// Frame-based AppKit primitives for the 380pt popover (labels, fills, lines).
+// Frame-based AppKit primitives shared by every screen (labels, fills, lines).
 // Exports: layout helpers; controls live in `controls`, scrolling in `scrolling`.
 // Deps: objc2, objc2_app_kit, objc2_foundation, crate::theme::Theme.
 
-use crate::theme::Theme;
+use crate::theme::{hex, Theme, CAN_BLUE, CAN_RED, CAN_YELLOW};
 use objc2::rc::Retained;
 use objc2::{AnyThread, MainThreadOnly};
 use objc2_app_kit::{
@@ -12,21 +12,36 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{MainThreadMarker, NSAttributedString, NSDictionary, NSPoint, NSRect, NSSize, NSNumber, NSString};
 
-pub const POPOVER_WIDTH: f64 = 380.0;
 pub const PAD_X: f64 = 16.0;
-pub const CONTENT_WIDTH: f64 = POPOVER_WIDTH - PAD_X * 2.0;
+/// The label stripe every screen carries along its top edge.
+pub const STRIPE_H: f64 = 3.0;
 
-/// The panel is an opaque surface, as the mock draws it. NSVisualEffectView was
-/// tried and dropped: behind-window vibrancy let the desktop through and made
-/// the design's flat mid-greys illegible, and the material had not settled the
-/// first time the popover was shown, so it looked different before and after
-/// the first click. A plain fill renders the same every time.
-pub fn root_view(height: f64, fill: (f64, f64, f64), mtm: MainThreadMarker) -> Retained<NSView> {
-    let view = NSView::initWithFrame(
-        NSView::alloc(mtm),
-        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(POPOVER_WIDTH, height)),
-    );
-    add_fill(&view, 0.0, 0.0, POPOVER_WIDTH, height, fill, 1.0, 0.0, mtm);
+/// A screen's backing: an opaque surface with the can's label along its top
+/// edge. NSVisualEffectView was tried and dropped: behind-window vibrancy let
+/// the desktop through and made flat mid-greys illegible, and the material had
+/// not settled the first time the popover was shown. A plain fill renders the
+/// same every time, in the popover and in the window.
+pub fn root_view(width: f64, height: f64, theme: &Theme, mtm: MainThreadMarker) -> Retained<NSView> {
+    let view = sheet_view(width, height, theme, mtm);
+    label_stripe(&view, mtm);
+    view
+}
+
+/// The can's label along a view's top edge, over whatever the view holds.
+pub fn label_stripe(view: &NSView, mtm: MainThreadMarker) {
+    let NSSize { width, height } = view.frame().size;
+    let mut x = 0.0;
+    for (colour, share) in [(CAN_BLUE, 0.62), (CAN_YELLOW, 0.26), (CAN_RED, 0.12)] {
+        add_fill(view, x, height - STRIPE_H, width * share, STRIPE_H, hex(colour), 1.0, 0.0, mtm);
+        x += width * share;
+    }
+}
+
+/// The same surface without the label: content that scrolls inside a screen.
+pub fn sheet_view(width: f64, height: f64, theme: &Theme, mtm: MainThreadMarker) -> Retained<NSView> {
+    let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(width, height));
+    let view = NSView::initWithFrame(NSView::alloc(mtm), frame);
+    add_fill(&view, 0.0, 0.0, width, height, theme.surface, 1.0, 0.0, mtm);
     view
 }
 

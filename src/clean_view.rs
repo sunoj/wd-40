@@ -1,19 +1,22 @@
-// Cleaning-progress popover body: disk header, job progress, and the rust
-// plate that lifts a tile as each target is really removed.
-// Exports: `build`, `TAG_STOP`, and the zone painters `live` calls each tick.
-// Deps: crate::{controls, crust, header, live, pace, plate, state, widgets}.
+// Cleaning-progress screen: disk header, job progress, and the plate that lifts
+// a tile as each target is really removed. Stacked in the popover; in the
+// window the figures and a line per target form a column beside the scan map.
+// Exports: `build`, `end_plate`, `TAG_STOP`, and the zone painters `live` calls each tick.
+// Deps: crate::{clean_list, controls, crust, header, layout, live, pace, plate, tile, usage_map}.
 
 use crate::controls::filled_button;
-use crate::crust::{crust_region, PLATE_H};
+use crate::crust::{group_tone, share_line, PLATE_H};
 use crate::header::{self, scan_size, HeaderModel};
-use crate::live::{self, Clean, Zone};
+use crate::layout::{self, content_w, panel_w, POPOVER_WIDTH};
+use crate::live::{self, Clean};
+use crate::zone::Zone;
 use crate::pace::{elapsed, eta_label};
-use crate::plate::plate_view;
+use crate::plate::{plate_view, PlateView};
 use crate::state::{AppState, CleanItemStatus, CleanProgress};
 use crate::theme::Theme;
-use crate::widgets::{
-    self, add_fill, add_line, label, label_right, label_wrap, CONTENT_WIDTH, PAD_X, POPOVER_WIDTH,
-};
+use crate::tile::{patches, Entry, Patch};
+use crate::{clean_list, usage_map};
+use crate::widgets::{self, add_fill, add_line, label, label_right, label_wrap, PAD_X};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::sel;
@@ -21,52 +24,126 @@ use objc2_app_kit::{NSTextField, NSView};
 use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize, NSString};
 use std::path::Path;
 use wd40::disk::sum_bytes;
+use wd40::scanner::ArtifactGroup;
 
 pub const TAG_STOP: isize = 2004;
 const STRIP_H: f64 = 46.0;
+/// The plate, the legend line under it, and the air around both.
 const PLATE_BLOCK: f64 = PLATE_H + 46.0;
 const PATH_H: f64 = 42.0;
 const FOOTER_H: f64 = 78.0;
 
+/// Everything the screen is built from, so the two layouts share one signature.
+struct Parts<'a> {
+    state: &'a AppState,
+    progress: &'a CleanProgress,
+    theme: &'a Theme,
+    target: &'a AnyObject,
+    mtm: MainThreadMarker,
+}
+
 pub fn build(state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainThreadMarker) -> (Retained<NSView>, f64) {
     let progress = state.cleaning.clone().unwrap_or_default();
+    let parts = Parts { state, progress: &progress, theme, target, mtm };
+    match layout::window_size() {
+        Some((width, height)) => (build_wide(&parts, width, height), height),
+        None => build_stacked(&parts),
+    }
+}
+
+/// The popover: header, progress, plate, path and button in one column. The
+/// plate holds the job's own targets and nothing else.
+fn build_stacked(parts: &Parts) -> (Retained<NSView>, f64) {
     let height = header::HEADER_HEIGHT + STRIP_H + PLATE_BLOCK + PATH_H + FOOTER_H;
-    let root = widgets::root_view(height, theme.surface, mtm);
-
-    let header_zone = Zone::new(&root, height - header::HEADER_HEIGHT, header::HEADER_HEIGHT, mtm);
-    draw_disk_header(header_zone.view(), header_zone.top(), state, &progress, theme, mtm);
-
-    let strip_top = height - header::HEADER_HEIGHT;
-    let strip_zone = Zone::new(&root, strip_top - STRIP_H, STRIP_H, mtm);
-    draw_strip(strip_zone.view(), strip_zone.top(), &progress, theme, mtm);
-
-    let (plate_bottom, plate, crust) = draw_plate(&root, strip_top - STRIP_H, state, &progress, theme, mtm);
-    let (caption, path) = draw_path(&root, plate_bottom, &progress, theme, mtm);
-
-    let footer_zone = Zone::new(&root, 0.0, FOOTER_H, mtm);
-    draw_footer(footer_zone.view(), &progress, theme, target, mtm);
-
-    live::install_clean(Clean {
-        theme: *theme,
-        header: header_zone,
-        strip: strip_zone,
-        footer: footer_zone,
-        caption,
-        path,
-        plate,
-        crust,
-    });
+    let root = widgets::root_view(panel_w(), height, parts.theme, parts.mtm);
+    let (header, strip, below) = draw_figures(&root, height, parts);
+    let frame = NSRect::new(NSPoint::new(PAD_X, below - PLATE_BLOCK + 34.0), NSSize::new(content_w(), PLATE_H));
+    let plate = draw_plate(&root, frame, patches(&job_entries(parts), frame.size), parts);
+    let (caption, path) = draw_path(&root, below - PLATE_BLOCK, parts);
+    let footer = draw_footer_zone(&root, parts);
+    live::install_clean(Clean { theme: *parts.theme, header, strip, footer, caption, path, plate, list: None });
     (root, height)
 }
 
-pub fn draw_disk_header(
-    root: &NSView,
-    y_top: f64,
-    state: &AppState,
-    p: &CleanProgress,
-    theme: &Theme,
-    mtm: MainThreadMarker,
-) {
+/// The window: the popover's column with a line per target where the plate
+/// was, and beside it the scan map itself as the plate — every target where
+/// the scan drew it, the job's solid and the rest faint.
+fn build_wide(parts: &Parts, width: f64, height: f64) -> Retained<NSView> {
+    let (theme, mtm) = (parts.theme, parts.mtm);
+    let root = widgets::root_view(width, height, theme, mtm);
+    add_fill(&root, POPOVER_WIDTH, 0.0, 1.0, height, theme.line, 1.0, 0.0, mtm);
+    let (header, strip, below) = draw_figures(&root, height, parts);
+    let (caption, path) = draw_path(&root, below, parts);
+    let footer = draw_footer_zone(&root, parts);
+    let list = clean_list::build(&root, FOOTER_H, below - PATH_H, parts.progress, theme, mtm);
+    let plate = map_plate(&root, layout::map_frame(width, height), parts);
+    live::install_clean(Clean { theme: *theme, header, strip, footer, caption, path, plate, list: Some(list) });
+    root
+}
+
+/// The scan map as a plate, under its colour key, in the settled pose for the
+/// run as it stands.
+fn map_plate(root: &NSView, frame: NSRect, parts: &Parts) -> Retained<PlateView> {
+    usage_map::draw_key(root, parts.state, frame, parts.theme, parts.mtm);
+    draw_plate(root, frame, map_patches(parts, frame.size), parts)
+}
+
+/// The same plate for a run that is over: the done screen's picture of how it
+/// ended, with the cleared footprints in the steel and the rest still in place.
+pub fn end_plate(root: &NSView, frame: NSRect, state: &AppState, run: &CleanProgress, theme: &Theme, target: &AnyObject, mtm: MainThreadMarker) {
+    map_plate(root, frame, &Parts { state, progress: run, theme, target, mtm });
+}
+
+/// The job's items as map entries, each in its target's group colour.
+fn job_entries(parts: &Parts) -> Vec<Entry> {
+    let targets = &parts.state.targets;
+    parts
+        .progress
+        .items
+        .iter()
+        .map(|item| Entry {
+            name: item.name.clone(),
+            path: String::new(),
+            bytes: item.size_bytes,
+            tone: group_tone(targets.get(item.index).map_or(ArtifactGroup::Rust, |target| target.kind.group())),
+        })
+        .collect()
+}
+
+/// The scan map's own tiles, re-keyed from targets to the job's item slots. A
+/// tile none of whose targets is in the job keeps no members and stays faint.
+fn map_patches(parts: &Parts, size: NSSize) -> Vec<Patch> {
+    let items = &parts.progress.items;
+    let mut laid = patches(&usage_map::entries(parts.state), size);
+    for patch in laid.iter_mut() {
+        let slots: Vec<usize> =
+            patch.members.iter().filter_map(|target| items.iter().position(|item| item.index == *target)).collect();
+        // A shared tile with a target outside the job is never wholly removed.
+        patch.held = slots.len() < patch.members.len();
+        patch.members = slots;
+    }
+    laid
+}
+
+/// Disk header and progress strip, stacked down from `top`. Returns the zones
+/// and the y the next block starts at.
+fn draw_figures(root: &NSView, top: f64, parts: &Parts) -> (Zone, Zone, f64) {
+    let (state, progress, theme, mtm) = (parts.state, parts.progress, parts.theme, parts.mtm);
+    let header_y = top - header::HEADER_HEIGHT;
+    let header = Zone::new(root, 0.0, header_y, header::HEADER_HEIGHT, mtm);
+    header.paint(|view, y_top| draw_disk_header(view, y_top, state, progress, theme, mtm));
+    let strip = Zone::new(root, 0.0, header_y - STRIP_H, STRIP_H, mtm);
+    strip.paint(|view, y_top| draw_strip(view, y_top, progress, theme, mtm));
+    (header, strip, header_y - STRIP_H)
+}
+
+fn draw_footer_zone(root: &NSView, parts: &Parts) -> Zone {
+    let footer = Zone::new(root, 0.0, 0.0, FOOTER_H, parts.mtm);
+    footer.paint(|view, _| draw_footer(view, parts.progress, parts.theme, parts.target, parts.mtm));
+    footer
+}
+
+pub fn draw_disk_header(root: &NSView, y_top: f64, state: &AppState, p: &CleanProgress, theme: &Theme, mtm: MainThreadMarker) {
     header::draw_header(
         root,
         y_top,
@@ -93,11 +170,14 @@ pub fn draw_strip(root: &NSView, y_top: f64, p: &CleanProgress, theme: &Theme, m
     let so_far = elapsed(p);
     let total = sum_bytes(p.items.iter().map(|i| i.size_bytes));
     let done = if total == 0 { 0.0 } else { p.freed_so_far as f64 / total as f64 };
-    add_fill(root, PAD_X, y_top - 22.0, CONTENT_WIDTH, 11.0, theme.ink_4, 1.0, 3.0, mtm);
-    add_fill(root, PAD_X, y_top - 22.0, (CONTENT_WIDTH * done.clamp(0.0, 1.0)).max(0.5), 11.0, theme.pos, 0.6, 3.0, mtm);
+    add_fill(root, PAD_X, y_top - 22.0, content_w(), 11.0, theme.surface_3, 1.0, 3.0, mtm);
+    // Nothing is drawn for nothing freed: a sliver of bar would claim a start.
+    if done > 0.0 {
+        add_fill(root, PAD_X, y_top - 22.0, (content_w() * done.min(1.0)).max(6.0), 11.0, theme.pos, 1.0, 3.0, mtm);
+    }
     label(root, &status_line(p), PAD_X, y_top - 42.0, 230.0, 16.0, 12.5, false, theme.ink, false, mtm);
     if let Some(eta) = eta_label(p, so_far) {
-        label_right(root, &eta, PAD_X + 230.0, y_top - 42.0, CONTENT_WIDTH - 230.0, 16.0, 11.5, theme.ink_3, true, mtm);
+        label_right(root, &eta, PAD_X + 230.0, y_top - 42.0, content_w() - 230.0, 16.0, 11.5, theme.ink_3, true, mtm);
     }
 }
 
@@ -122,42 +202,26 @@ fn status_line(p: &CleanProgress) -> String {
 /// Bytes this job has not taken off the disk: what is still queued, what is
 /// running, and whatever a part-way removal left behind.
 fn left_bytes(p: &CleanProgress) -> u64 {
-    sum_bytes(
-        p.items
-            .iter()
-            .map(|item| item.size_bytes.saturating_sub(item.freed_bytes)),
-    )
+    sum_bytes(p.items.iter().map(|item| item.size_bytes.saturating_sub(item.freed_bytes)))
 }
 
-fn draw_plate(
-    root: &NSView,
-    y_top: f64,
-    state: &AppState,
-    p: &CleanProgress,
-    theme: &Theme,
-    mtm: MainThreadMarker,
-) -> (f64, Retained<crate::plate::PlateView>, NSRect) {
-    let y = y_top - PLATE_BLOCK;
-    let legend = label(root, "", PAD_X, y + 8.0, CONTENT_WIDTH, 16.0, 11.5, false, theme.ink_2, true, mtm);
-    let frame = NSRect::new(NSPoint::new(PAD_X, y + 34.0), NSSize::new(CONTENT_WIDTH, PLATE_H));
-    let job = sum_bytes(p.items.iter().map(|i| i.size_bytes));
-    let (crust, share) = crust_region(job, state.disk_stats());
-    let view = plate_view(frame, p, crust, legend, share, theme.dark, mtm);
+/// The plate at `frame`, with its legend line directly under it.
+fn draw_plate(root: &NSView, frame: NSRect, laid: Vec<Patch>, parts: &Parts) -> Retained<PlateView> {
+    let (theme, mtm, progress) = (parts.theme, parts.mtm, parts.progress);
+    let legend = label(root, "", frame.origin.x, frame.origin.y - 26.0, frame.size.width, 16.0, 11.5, false, theme.ink_2, true, mtm);
+    let job = sum_bytes(progress.items.iter().map(|item| item.size_bytes));
+    let share = share_line(job, parts.state.disk_stats());
+    let view = plate_view(frame, laid, progress, share, legend, theme.dark, mtm);
     root.addSubview(&view);
-    (y, view, crust)
+    view
 }
 
-fn draw_path(
-    root: &NSView,
-    y_top: f64,
-    p: &CleanProgress,
-    theme: &Theme,
-    mtm: MainThreadMarker,
-) -> (Retained<NSTextField>, Retained<NSTextField>) {
-    let caption = label(root, "", PAD_X, y_top - 20.0, CONTENT_WIDTH, 14.0, 11.0, false, theme.ink_3, true, mtm);
-    let path = label(root, "", PAD_X, y_top - 38.0, CONTENT_WIDTH, 16.0, 12.0, false, theme.ink, true, mtm);
-    show_path(&caption, &path, p);
-    add_line(root, 0.0, y_top - PATH_H, POPOVER_WIDTH, theme.line, mtm);
+fn draw_path(root: &NSView, y_top: f64, parts: &Parts) -> (Retained<NSTextField>, Retained<NSTextField>) {
+    let (theme, mtm) = (parts.theme, parts.mtm);
+    let caption = label(root, "", PAD_X, y_top - 20.0, content_w(), 14.0, 11.0, false, theme.ink_3, true, mtm);
+    let path = label(root, "", PAD_X, y_top - 38.0, content_w(), 16.0, 12.0, false, theme.ink, true, mtm);
+    show_path(&caption, &path, parts.progress);
+    add_line(root, 0.0, y_top - PATH_H, panel_w(), theme.line, mtm);
     (caption, path)
 }
 
@@ -166,7 +230,7 @@ fn draw_path(
 /// Once nothing is running the caption stops saying otherwise: the same path is
 /// then the last target the run touched, not one being worked.
 pub fn show_path(caption: &NSTextField, field: &NSTextField, p: &CleanProgress) {
-    let heading = if p.working() { "removing" } else { "last target" };
+    let heading = if p.working() { "REMOVING" } else { "LAST TARGET" };
     caption.setStringValue(&NSString::from_str(heading));
     let text = match p.current_path.is_empty() {
         true => "\u{2026}".to_string(),
@@ -181,28 +245,24 @@ pub fn show_path(caption: &NSTextField, field: &NSTextField, p: &CleanProgress) 
     field.setStringValue(&NSString::from_str(&text));
 }
 
-pub fn draw_footer(
-    root: &NSView,
-    p: &CleanProgress,
-    theme: &Theme,
-    target: &AnyObject,
-    mtm: MainThreadMarker,
-) {
+pub fn draw_footer(root: &NSView, p: &CleanProgress, theme: &Theme, target: &AnyObject, mtm: MainThreadMarker) {
     // Once the last target has settled there is nothing left to stop, and a
     // Stop button would say there was. The screen is only still up because it
     // is being shown, so the button offers the way out of it.
-    let (title, action) = match p.working() {
-        true => (stop_title(p), sel!(handleStopClean:)),
-        false => ("Show the result".to_string(), sel!(handleShowResult:)),
+    match p.working() {
+        true => filled_button(
+            root, &stop_title(p), PAD_X, 38.0, content_w(), sel!(handleStopClean:),
+            target, TAG_STOP, theme.surface_2, theme.danger, mtm,
+        ),
+        false => filled_button(
+            root, "Show the result", PAD_X, 38.0, content_w(), sel!(handleShowResult:),
+            target, TAG_STOP, theme.cta, theme.cta_ink, mtm,
+        ),
     };
-    filled_button(
-        root, &title, PAD_X, 38.0, CONTENT_WIDTH, action,
-        target, TAG_STOP, theme.surface_2, theme.ink, mtm,
-    );
     label_wrap(
         root,
-        "Spray lifts residue off cleared steel; a tile goes only when its target is really gone. Nothing reaches the Trash.",
-        PAD_X, 6.0, CONTENT_WIDTH, 30.0, 11.5, theme.ink_3, mtm,
+        "A tile lifts off the steel only when its target is really gone. Nothing reaches the Trash.",
+        PAD_X, 6.0, content_w(), 30.0, 11.5, theme.ink_3, mtm,
     );
 }
 

@@ -1,9 +1,8 @@
-// Background scan/clean orchestration for the WD-40 popover app.
+// Background scan/clean orchestration for the WD-40 menu bar app.
 // Exports: scan/clean spawners, timer control, main-thread completion hooks.
-// Deps: objc2, crate::{live, mainthread, names, popover, state, tasks_clean}.
+// Deps: objc2, crate::{live, mainthread, names, state, surface, tasks_clean}.
 
 use crate::live;
-use crate::popover;
 use crate::state::{
     with_state, with_state_ret, CleanProgress, DoneSummary, UiScreen,
 };
@@ -85,7 +84,7 @@ fn scan_screen_is_visible(screen: UiScreen) -> bool {
 
 fn discovery_sweep_should_run() -> bool {
     DISCOVERING.load(Ordering::Relaxed)
-        && popover::is_open()
+        && crate::surface::is_open()
         && with_state_ret(|state| scan_screen_is_visible(state.screen)).unwrap_or(false)
 }
 
@@ -159,8 +158,8 @@ pub fn start_scan() {
         .unwrap_or(false);
         // An open scan needs the in-progress copy immediately; a closed one
         // catches the same state through popover::content_ready on reopen.
-        if left_done || popover::is_open() {
-            popover::refresh(mtm);
+        if left_done || crate::surface::is_open() {
+            crate::surface::refresh(mtm);
             discovery_sweep_started();
         }
     }
@@ -178,7 +177,7 @@ pub fn on_scan_done(mtm: MainThreadMarker) {
     crate::scrolling::reset_scroll();
     let Some(targets) = SCAN_RESULT.lock().unwrap().take() else {
         SCANNING.store(false, Ordering::Relaxed);
-        popover::refresh(mtm);
+        crate::surface::refresh(mtm);
         return;
     };
     SIZES.lock().unwrap().clear();
@@ -190,11 +189,11 @@ pub fn on_scan_done(mtm: MainThreadMarker) {
     });
     RECLAIM_STARTED.store(false, Ordering::Relaxed);
     RECLAIM_LANDED.store(false, Ordering::Relaxed);
-    popover::refresh(mtm);
+    crate::surface::refresh(mtm);
     let pending: Vec<TargetDir> =
         with_state_ret(|state| state.targets.clone()).unwrap_or_default();
     // Someone looking at the popover is waiting on this pass; a timer scan is not.
-    let priority = if popover::is_open() { Priority::Waited } else { Priority::Housekeeping };
+    let priority = if crate::surface::is_open() { Priority::Waited } else { Priority::Housekeeping };
     std::thread::spawn(move || {
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             size_targets(&pending, priority, |sized| {
@@ -223,9 +222,9 @@ pub fn on_sizes_tick(mtm: MainThreadMarker) {
         }
     });
     if !live::sizes_arrived(&indices, mtm) {
-        popover::refresh(mtm);
+        crate::surface::refresh(mtm);
     }
-    popover::refresh_status(mtm);
+    crate::status::refresh(mtm);
 }
 
 fn settled_size(sized: wd40::sizes::SizedTarget) -> SettledSize {
@@ -238,7 +237,7 @@ pub fn on_sizes_done(mtm: MainThreadMarker) {
     // Only now is there a full set of figures to sort by, so this is the one
     // point at which rows are allowed to move.
     with_state(|state| state.finish_sizing());
-    popover::refresh(mtm);
+    crate::surface::refresh(mtm);
     #[cfg(debug_assertions)]
     crate::screenshot::maybe_start(mtm);
 }
@@ -286,10 +285,13 @@ pub fn on_reclaim_done(mtm: MainThreadMarker) {
         println!("Reclaimable {} on the device, {summed} summed", wd40::scanner::human_size(state.total_size()));
     });
     RECLAIM_LANDED.store(true, Ordering::Relaxed);
-    if !live::totals_changed(mtm) {
-        popover::refresh(mtm);
+    // Only the scan screen shows this figure. Rebuilding the cleaning screen
+    // for it would replace the plate in the middle of a lift.
+    let on_scan = with_state_ret(|state| state.screen == UiScreen::Scan).unwrap_or(false);
+    if on_scan && !live::totals_changed(mtm) {
+        crate::surface::refresh(mtm);
     }
-    popover::refresh_status(mtm);
+    crate::status::refresh(mtm);
 }
 
 pub(crate) fn take_reclaim_landed() -> bool {
@@ -317,7 +319,7 @@ pub fn spawn_clean_selected() {
         stop_timer(&HOLD_TIMER);
         *PENDING_DONE.lock().unwrap() = None;
         *CLEAN_SHOWN.lock().unwrap() = Some(Instant::now());
-        popover::refresh(mtm);
+        crate::surface::refresh(mtm);
     }
 
     std::thread::spawn(move || {
@@ -354,7 +356,7 @@ pub fn on_progress(mtm: MainThreadMarker) {
     let snapshot = PROGRESS.lock().unwrap().clone();
     with_state(|state| state.cleaning = snapshot);
     if !live::progress_changed(mtm) {
-        popover::refresh(mtm);
+        crate::surface::refresh(mtm);
     }
 }
 
@@ -364,7 +366,7 @@ pub fn request_stop() {
     // already been asked to do.
     if let Some(mtm) = MainThreadMarker::new() {
         if !live::progress_changed(mtm) {
-            popover::refresh(mtm);
+            crate::surface::refresh(mtm);
         }
     }
 }
@@ -377,9 +379,11 @@ pub fn on_clean_done(mtm: MainThreadMarker) {
     // the counts, the bar and the plate all read done because they are.
     let settled = PROGRESS.lock().unwrap().clone();
     with_state(|state| state.cleaning = settled);
+    // Patch first, so the wait below covers the lifts this tick queues.
+    let patched = live::progress_changed(mtm);
     let Some(seconds) = hold_left() else { return show_result(mtm) };
-    if !live::progress_changed(mtm) {
-        popover::refresh(mtm);
+    if !patched {
+        crate::surface::refresh(mtm);
     }
     schedule(&HOLD_TIMER, seconds, sel!(cleanHoldTick:), false);
 }
@@ -392,7 +396,8 @@ fn hold_left() -> Option<f64> {
         return None;
     }
     let shown = (*CLEAN_SHOWN.lock().unwrap())?;
-    let left = MIN_CLEAN_SCREEN - shown.elapsed().as_secs_f64();
+    // The plate may be behind the job: wait for its last lift to play.
+    let left = (MIN_CLEAN_SCREEN - shown.elapsed().as_secs_f64()).max(live::lifts_left() + 0.3);
     (left > 0.05).then_some(left)
 }
 
@@ -408,11 +413,11 @@ pub fn show_result(mtm: MainThreadMarker) {
     *PROGRESS.lock().unwrap() = None;
     *CLEAN_SHOWN.lock().unwrap() = None;
     with_state(|state| {
-        state.cleaning = None;
+        state.last_run = state.cleaning.take();
         state.done = summary;
         state.screen = UiScreen::Done;
     });
-    popover::refresh(mtm);
+    crate::surface::refresh(mtm);
 }
 
 /// The button on the held screen. It only skips the wait — there is nothing to
