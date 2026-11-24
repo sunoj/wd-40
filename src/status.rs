@@ -6,7 +6,7 @@
 use crate::icon::{rust_text_color, rusty_icon};
 use crate::state::{with_state_ret, AppState};
 use crate::style::tinted;
-use objc2_app_kit::NSFont;
+use objc2_app_kit::{NSColor, NSFont};
 use objc2_foundation::{ns_string, MainThreadMarker};
 use std::cell::Cell;
 use wd40::scanner::human_size;
@@ -26,7 +26,9 @@ pub fn refresh(mtm: MainThreadMarker) {
 pub fn update(state: &AppState, mtm: MainThreadMarker) {
     let total = state.total_size();
     let Some(button) = state.status_item.button(mtm) else { return };
-    let bucket = icon_bucket(total);
+    // With colour off the glyph is always the plain template, whatever the size.
+    let color = state.config.menu_bar_color;
+    let bucket = if color { icon_bucket(total) } else { 0 };
     let redraw = ICON_BUCKET.with(|cell| {
         let same = cell.get() == bucket && button.image().is_some();
         if !same {
@@ -35,7 +37,7 @@ pub fn update(state: &AppState, mtm: MainThreadMarker) {
         !same
     });
     if redraw {
-        if let Some(image) = rusty_icon(total) {
+        if let Some(image) = rusty_icon(total, color) {
             button.setImage(Some(&image));
         }
     }
@@ -45,7 +47,8 @@ pub fn update(state: &AppState, mtm: MainThreadMarker) {
     }
     let title = format!(" {}", human_size(total));
     let font = NSFont::menuBarFontOfSize(0.0);
-    button.setAttributedTitle(&tinted(&title, &font, &rust_text_color(total)));
+    let tint = if color { rust_text_color(total) } else { NSColor::labelColor() };
+    button.setAttributedTitle(&tinted(&title, &font, &tint));
 }
 
 fn icon_bucket(total_bytes: u64) -> u8 {

@@ -138,6 +138,14 @@ pub fn toggle_menu_bar_size(mtm: MainThreadMarker) {
     crate::surface::refresh(mtm);
 }
 
+pub fn toggle_menu_bar_color(mtm: MainThreadMarker) {
+    with_state(|state| {
+        state.config.menu_bar_color = !state.config.menu_bar_color;
+        state.config.save();
+    });
+    crate::surface::refresh(mtm);
+}
+
 /// Add a folder to the scan roots. The panel is a window of its own, so the
 /// popover dismisses itself while it is up; the new root is scanned straight
 /// away and is there on the next open.

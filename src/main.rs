@@ -196,6 +196,11 @@ define_class!(
             actions::toggle_menu_bar_size(self.mtm());
         }
 
+        #[unsafe(method(settingsToggleMenuBarColor:))]
+        fn settings_toggle_menu_bar_color(&self, _sender: &AnyObject) {
+            actions::toggle_menu_bar_color(self.mtm());
+        }
+
         #[unsafe(method(settingsAddRoot:))]
         fn settings_add_root(&self, _sender: &AnyObject) {
             actions::add_scan_root(self.mtm());

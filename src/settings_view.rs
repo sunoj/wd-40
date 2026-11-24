@@ -110,7 +110,15 @@ fn draw_scanning(
         },
         &depth, open == Some(SettingsDisclosure::ScanDepth), &depth_choices, theme, target, mtm,
     );
-    switch_row(
+    draw_menu_bar(parent, y, state, theme, target, mtm)
+}
+
+/// The two switches for what the menu bar item shows: the figure, and colour.
+fn draw_menu_bar(
+    parent: &NSView, y: f64, state: &AppState,
+    theme: &Theme, target: &AnyObject, mtm: MainThreadMarker,
+) -> f64 {
+    let y = switch_row(
         parent, y,
         &Spec {
             title: "Show size in menu bar",
@@ -118,6 +126,15 @@ fn draw_scanning(
             action: sel!(settingsToggleMenuBarSize:),
         },
         state.config.menu_bar_size, theme, target, mtm,
+    );
+    switch_row(
+        parent, y,
+        &Spec {
+            title: "Colour in menu bar",
+            hint: Some("Tint the glyph and size as artifacts pile up"),
+            action: sel!(settingsToggleMenuBarColor:),
+        },
+        state.config.menu_bar_color, theme, target, mtm,
     )
 }
 

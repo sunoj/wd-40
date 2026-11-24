@@ -26,6 +26,9 @@ pub struct Config {
     pub scan_groups: Vec<String>,
     /// Print the reclaimable total beside the menu bar glyph.
     pub menu_bar_size: bool,
+    /// Tint the menu bar glyph and figure by artifact weight; off keeps them
+    /// in the menu bar's own monochrome.
+    pub menu_bar_color: bool,
 }
 
 impl Default for Config {
@@ -37,6 +40,7 @@ impl Default for Config {
             auto_clean_hours: 0,
             scan_groups: ArtifactGroup::ALL.iter().map(|g| g.key().to_string()).collect(),
             menu_bar_size: true,
+            menu_bar_color: true,
         }
     }
 }
@@ -152,6 +156,7 @@ mod tests {
         assert_eq!(config.max_age_days, 3);
         assert!(ArtifactGroup::ALL.iter().all(|group| config.scans(*group)));
         assert!(config.menu_bar_size);
+        assert!(config.menu_bar_color);
     }
 
     #[test]
