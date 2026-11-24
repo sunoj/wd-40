@@ -5,7 +5,7 @@
 
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime};
-use wd40::scanner::{ArtifactGroup, TargetDir};
+use wd40::scanner::{ArtifactGroup, ArtifactKind, TargetDir};
 
 const SECONDS_PER_DAY: u64 = 86_400;
 
@@ -37,11 +37,18 @@ pub fn is_recent(target: &TargetDir, max_age_days: u64) -> bool {
 
 /// The batch "tick the old ones" stands for: every listed target that is past
 /// the keep threshold by the same test as the RECENT badge. It only names
-/// positions; ticking them changes a selection and nothing else.
+/// positions; ticking them changes a selection and nothing else. Toolchains
+/// and simulator devices stay out, as they do for auto-clean: their age says
+/// nothing about whether they are still in use, so they are ticked by hand.
 pub fn old_targets(targets: &[TargetDir], empty: &HashSet<usize>, max_age_days: u64) -> HashSet<usize> {
     (0..targets.len())
-        .filter(|index| !empty.contains(index) && !is_recent(&targets[*index], max_age_days))
+        .filter(|index| !empty.contains(index) && in_old_batch(&targets[*index], max_age_days))
         .collect()
+}
+
+fn in_old_batch(target: &TargetDir, max_age_days: u64) -> bool {
+    !matches!(target.kind, ArtifactKind::Toolchain | ArtifactKind::Simulator)
+        && !is_recent(target, max_age_days)
 }
 
 /// Nothing is checked after a scan. Deleting here is irreversible and skips the
@@ -217,7 +224,12 @@ mod tests {
             last_modified: SystemTime::now() - Duration::from_secs(days * 86_400 + 60),
             kind: wd40::scanner::ArtifactKind::RustTarget,
         };
-        let targets = [at(0), at(6), at(7), at(8), at(400), at(90)];
+        let kind = |kind, target: TargetDir| TargetDir { kind, ..target };
+        let targets = [
+            at(0), at(6), at(7), at(8), at(400), at(90),
+            kind(wd40::scanner::ArtifactKind::Simulator, at(90)),
+            kind(wd40::scanner::ArtifactKind::Toolchain, at(90)),
+        ];
         let empty = std::collections::HashSet::from([5]);
         let old = super::old_targets(&targets, &empty, 7);
         assert_eq!(old, std::collections::HashSet::from([2, 3, 4]));
