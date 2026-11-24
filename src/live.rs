@@ -175,7 +175,7 @@ pub fn selection_changed(mtm: MainThreadMarker) -> bool {
             if let Some(map) = &scan.map {
                 map.sync(&state.selected);
             }
-            scan.footer.repaint(|view, _| crate::scan_view::draw_footer(view, state, &scan.theme, target, mtm));
+            scan.footer.repaint(|view, _| crate::scan_footer::draw_footer(view, state, &scan.theme, target, mtm));
             true
         })
     })
@@ -256,7 +256,7 @@ fn redraw_scan_header(scan: &Scan, state: &AppState, mtm: MainThreadMarker) {
 
 fn redraw_scan_frame(scan: &Scan, state: &AppState, target: &AnyObject, mtm: MainThreadMarker) {
     redraw_scan_header(scan, state, mtm);
-    scan.footer.repaint(|view, _| crate::scan_view::draw_footer(view, state, &scan.theme, target, mtm));
+    scan.footer.repaint(|view, _| crate::scan_footer::draw_footer(view, state, &scan.theme, target, mtm));
 }
 
 /// Run `body` only while `screen` is the one on show, with the state and the

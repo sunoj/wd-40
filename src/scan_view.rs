@@ -1,15 +1,16 @@
 // Scan-results screen: grouped selectable targets and the clean CTA. One column
 // in the popover; the same column beside the usage map in the window.
-// Exports: `build`, `draw_footer`, `header_model`, the screen's tags.
+// Exports: `build`, `header_model`, `membership`, the screen's tags.
 // Deps: crate::{controls, header, live, menu_rows, scan_rows, state, widgets}.
 
 use crate::layout::{self, content_w, panel_w};
 use crate::usage_map;
-use crate::controls::{clean_button, set_cmd_key, text_button_hint, text_button_underlined, CleanCta};
+use crate::controls::text_button_underlined;
+use crate::scan_footer::{draw_footer, footer_h};
 use crate::header::{self, scan_size, ScanHeader};
 use crate::live::{self, Group, Row, Scan};
 use crate::zone::Zone;
-use crate::menu_rows::{plan_groups, GroupPlan};
+use crate::menu_rows::{plan_groups, Fold, GroupPlan};
 use crate::names::display_names;
 use crate::scan_rows::{self, GroupModel, RowModel, GROUP_H, ROW_H};
 use crate::selection::group_selection;
@@ -23,8 +24,6 @@ use objc2::runtime::AnyObject;
 use objc2::sel;
 use objc2_app_kit::NSView;
 use objc2_foundation::MainThreadMarker;
-use wd40::disk::sum_bytes;
-use wd40::scanner::sizes_may_overlap;
 
 pub const TAG_CLEAN: isize = 2000;
 pub const TAG_RESCAN: isize = 2001;
@@ -36,20 +35,9 @@ pub const TAG_GROUP_BASE: isize = 3000;
 /// Well clear of the item tags, which run from `TAG_ITEM_BASE` one per row.
 pub const TAG_REVEAL_BASE: isize = 10_000;
 
-/// How many rows a group shows in the popover before the rest fold away.
-const VISIBLE_CAP: usize = 6;
-/// Button, shortcuts and padding. The caveat line adds its own height only
-/// when there is a caveat.
-const FOOTER_BASE_H: f64 = 95.0;
-const CAVEAT_H: f64 = 20.0;
-const RECEIPT_H: f64 = 20.0;
-
-fn footer_h(state: &AppState) -> f64 {
-    FOOTER_BASE_H
-        + if footer_caveat(state).is_some() { CAVEAT_H } else { 0.0 }
-        + if crate::auto_clean::receipt_line().is_some() { RECEIPT_H } else { 0.0 }
-}
-const MAX_HEIGHT: f64 = 540.0;
+/// How many of its old targets a group shows in the popover before folding.
+const ROWS_PER_GROUP: usize = 3;
+const MAX_HEIGHT: f64 = 680.0;
 
 pub fn build(state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainThreadMarker) -> (Retained<NSView>, f64) {
     match layout::window_size() {
@@ -61,7 +49,7 @@ pub fn build(state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainThrea
 /// The popover: header, a capped list, and the footer in one column.
 fn build_stacked(state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainThreadMarker) -> (Retained<NSView>, f64) {
     let empty = state.empty_targets();
-    let plans = plan_groups(&state.targets, &empty, row_limit(state));
+    let plans = plan_groups(&state.targets, &empty, fold(state));
     let list_h = measure_list(&plans);
     let body_h = (MAX_HEIGHT - header::SCAN_HEADER_HEIGHT - footer_h(state)).min(list_h);
     let height = header::SCAN_HEADER_HEIGHT + body_h + footer_h(state);
@@ -77,7 +65,7 @@ fn build_stacked(state: &AppState, theme: &Theme, target: &AnyObject, mtm: MainT
 /// beside it the usage map — the same targets as tiles, sized by their bytes.
 fn build_wide(state: &AppState, theme: &Theme, target: &AnyObject, width: f64, height: f64, mtm: MainThreadMarker) -> Retained<NSView> {
     let empty = state.empty_targets();
-    let plans = plan_groups(&state.targets, &empty, row_limit(state));
+    let plans = plan_groups(&state.targets, &empty, fold(state));
     let root = widgets::root_view(width, height, theme, mtm);
     add_fill(&root, panel_w(), 0.0, 1.0, height, theme.line, 1.0, 0.0, mtm);
     let (header, footer) = draw_frame(&root, height, state, theme, target, mtm);
@@ -104,17 +92,20 @@ fn draw_frame(root: &NSView, height: f64, state: &AppState, theme: &Theme, targe
     (header, footer)
 }
 
-/// The popover shows the largest few and offers a link for the rest; the
-/// window has the room, so it shows them all.
-fn row_limit(state: &AppState) -> usize {
-    if state.show_all || crate::window::is_visible() { usize::MAX } else { VISIBLE_CAP }
+/// The popover shows a few of each group's old targets and folds the rest
+/// behind a link; the window has the room, so it shows them all.
+fn fold(state: &AppState) -> Fold {
+    match state.show_all || crate::window::is_visible() {
+        true => Fold::all(),
+        false => Fold { per_group: ROWS_PER_GROUP, keep_days: Some(state.config.max_age_days) },
+    }
 }
 
 /// What this state would put on the scan list. Compared to the tree we last
 /// built so an open can reuse it only when the rows and counts still match.
 pub fn membership(state: &AppState) -> crate::menu_rows::Membership {
     let empty = state.empty_targets();
-    crate::menu_rows::Membership::of(&state.targets, &empty, row_limit(state))
+    crate::menu_rows::Membership::of(&state.targets, &empty, fold(state))
 }
 
 pub fn header_model(state: &AppState) -> ScanHeader {
@@ -205,7 +196,7 @@ fn draw_show_more(
     target: &AnyObject,
     mtm: MainThreadMarker,
 ) -> f64 {
-    if plan.hidden > 0 && y > list_bottom + 40.0 {
+    if plan.hidden() > 0 && y > list_bottom + 40.0 {
         text_button_underlined(
             root, &show_more_title(state, plan), PAD_X, y - 28.0, content_w(),
             sel!(handleShowMore:), target, TAG_SHOW_MORE, theme.ink_2, mtm,
@@ -219,18 +210,19 @@ fn draw_show_more(
     y
 }
 
-/// Until every size is in, the hidden rows are neither known to be the smaller
-/// ones nor known to add up to anything, so the link claims neither.
+/// What the link under a group unfolds, said as it is: old targets past the
+/// row budget are "more", recent ones are "recent", and neither is called
+/// smaller. The size is left off until every figure in the group is in.
 fn show_more_title(state: &AppState, plan: &GroupPlan<'_>) -> String {
-    if !state.group_settled(plan.group) {
-        return format!("Show {} more", plan.hidden);
+    let what = match (plan.more, plan.recent) {
+        (more, 0) => format!("Show {more} more"),
+        (0, recent) => format!("Show {recent} recent"),
+        (more, recent) => format!("Show {more} more and {recent} recent"),
+    };
+    match state.group_settled(plan.group) {
+        true => format!("{what} \u{00b7} {}", scan_size(plan.hidden_bytes)),
+        false => what,
     }
-    let hidden_size = sum_bytes(
-        state.targets.iter().enumerate()
-            .filter(|(i, td)| td.kind.group() == plan.group && !plan.rows.iter().any(|r| r.index == *i))
-            .map(|(_, td)| td.size_bytes),
-    );
-    format!("Show {} smaller targets \u{00b7} {}", plan.hidden, scan_size(hidden_size))
 }
 
 fn measure_list(plans: &[GroupPlan<'_>]) -> f64 {
@@ -240,60 +232,10 @@ fn measure_list(plans: &[GroupPlan<'_>]) -> f64 {
     let mut h = 8.0;
     for plan in plans {
         h += GROUP_H + plan.rows.len() as f64 * ROW_H;
-        if plan.hidden > 0 {
+        if plan.hidden() > 0 {
             h += 40.0;
         }
         h += 8.0;
     }
     h
-}
-
-pub fn draw_footer(
-    parent: &NSView,
-    state: &AppState,
-    theme: &Theme,
-    target: &AnyObject,
-    mtm: MainThreadMarker,
-) {
-    add_line(parent, 0.0, footer_h(state), panel_w(), theme.line, mtm);
-    clean_button(parent, &clean_cta(state), PAD_X, footer_h(state) - 47.0, content_w(), sel!(handleCleanSelected:), target, TAG_CLEAN, theme, mtm);
-    let mut line_y = footer_h(state) - 69.0;
-    if let Some(receipt) = crate::auto_clean::receipt_line() {
-        label(parent, &receipt, PAD_X, line_y, content_w(), 16.0, 11.0, false, theme.ink_3, false, mtm);
-        line_y -= RECEIPT_H;
-    }
-    if let Some(caveat) = footer_caveat(state) {
-        label(parent, &caveat, PAD_X, line_y, content_w(), 16.0, 11.5, false, theme.ink_3, false, mtm);
-    }
-    let rescan = text_button_hint(parent, "Rescan", "\u{2318}R", PAD_X, 13.0, sel!(handleRescan:), target, TAG_RESCAN, theme.ink_2, theme.ink_4, mtm);
-    set_cmd_key(&rescan, "r");
-    // The window is where this footer already is when it is open.
-    if !crate::window::is_visible() {
-        let window = text_button_hint(parent, "Window", "\u{2318}O", (panel_w() - 86.0) / 2.0, 13.0, sel!(openWindow:), target, TAG_WINDOW, theme.ink_2, theme.ink_4, mtm);
-        set_cmd_key(&window, "o");
-    }
-    let settings = text_button_hint(parent, "Settings", "\u{2318},", panel_w() - PAD_X - 96.0, 13.0, sel!(openSettings:), target, TAG_SETTINGS, theme.ink_2, theme.ink_4, mtm);
-    set_cmd_key(&settings, ",");
-}
-
-fn clean_cta(state: &AppState) -> CleanCta {
-    if state.sizing() || crate::tasks::is_scanning() {
-        return CleanCta::Measuring;
-    }
-    if state.selected.is_empty() {
-        return CleanCta::Empty;
-    }
-    CleanCta::Ready {
-        count: state.selected.len(),
-        size: scan_size(state.selected_size()),
-    }
-}
-
-/// The only thing the footer can say that the rows do not already show. Empty
-/// checkboxes, RECENT badges and a disabled button state the rest of it
-/// themselves; repeating them in prose was noise on every open.
-fn footer_caveat(state: &AppState) -> Option<String> {
-    let paths: Vec<_> = state.targets.iter().map(|t| t.path.clone()).collect();
-    sizes_may_overlap(&paths)
-        .then(|| "Sizes overlap where builds share APFS clones.".to_string())
 }

@@ -194,6 +194,10 @@ pub fn draw_key(root: &NSView, state: &AppState, map: NSRect, theme: &Theme, mtm
         }
         let title = ArtifactGroup::title(group);
         let width = fitted_width(title, 11.5, false, mtm);
+        // A narrow window has no room for every group; none is drawn clipped.
+        if x + 14.0 + width > map.origin.x + map.size.width {
+            break;
+        }
         add_fill(root, x, y + 4.0, 9.0, 9.0, group_tone(group), 1.0, 2.0, mtm);
         label(root, title, x + 14.0, y, width + 2.0, 16.0, 11.5, false, theme.ink_2, false, mtm);
         x += 14.0 + width + 18.0;

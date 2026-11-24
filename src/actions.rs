@@ -24,6 +24,21 @@ pub fn toggle_item(tag: isize, mtm: MainThreadMarker) {
     }
 }
 
+/// Tick every target past the keep threshold. Ticks are only added — a row
+/// the user ticked by hand stays ticked — and nothing is removed by this.
+pub fn tick_old(mtm: MainThreadMarker) {
+    let intent = with_state_ret(|state| {
+        let was_empty = state.selected.is_empty();
+        let old = crate::selection::old_targets(&state.targets, &state.empty_targets(), state.config.max_age_days);
+        state.selected.extend(old);
+        (was_empty, state.selected.is_empty())
+    }).unwrap_or((false, true));
+    tasks::reclaim_for_selection_intent(intent.0, intent.1);
+    if !crate::live::selection_changed(mtm) {
+        crate::surface::refresh(mtm);
+    }
+}
+
 pub fn done_ack(mtm: MainThreadMarker) {
     with_state(|state| {
         state.screen = UiScreen::Scan;

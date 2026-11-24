@@ -126,8 +126,11 @@ pub fn draw_group_header(
     // Boxes centre on y + 13.5; all-caps text carries descender space it never
     // uses, so its frame sits a point lower to land on the same optical line.
     label_tracked(parent, title(model.group), PAD_X + 46.0, y + 4.0, 120.0, 17.0, 11.5, false, theme.ink_3, true, 0.69, mtm);
-    widgets::add_fill(parent, PAD_X + 166.0, y + 5.0, 28.0, 17.0, theme.surface_2, 1.0, 4.0, mtm);
-    label(parent, &model.count.to_string(), PAD_X + 171.0, y + 6.0, 18.0, 15.0, 10.5, false, theme.ink_3, true, mtm);
+    // As wide as its figure: a fixed badge clipped a three-digit count to two.
+    let count = model.count.to_string();
+    let count_w = widgets::fitted_width(&count, 10.5, true, mtm);
+    widgets::add_fill(parent, PAD_X + 166.0, y + 5.0, count_w + 10.0, 17.0, theme.surface_2, 1.0, 4.0, mtm);
+    label(parent, &count, PAD_X + 171.0, y + 6.0, count_w + 2.0, 15.0, 10.5, false, theme.ink_3, true, mtm);
     let size = label_right(parent, "", PAD_X + 203.0, y + 4.0, content_w() - 203.0, 17.0, 12.0, theme.ink_2, true, mtm);
     show_group_size(&size, model.size, model.settled);
     (y, Group { group: model.group, size, check })

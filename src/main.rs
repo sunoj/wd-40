@@ -33,6 +33,7 @@ mod pace;
 mod plate;
 mod popover;
 mod reveal;
+mod scan_footer;
 mod scan_rows;
 mod scrolling;
 mod scan_view;
@@ -115,6 +116,11 @@ define_class!(
             if !live::selection_changed(self.mtm()) {
                 surface::refresh(self.mtm());
             }
+        }
+
+        #[unsafe(method(handleTickOld:))]
+        fn handle_tick_old(&self, _sender: &AnyObject) {
+            actions::tick_old(self.mtm());
         }
 
         #[unsafe(method(handleRevealItem:))]

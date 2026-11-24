@@ -35,6 +35,15 @@ pub fn is_recent(target: &TargetDir, max_age_days: u64) -> bool {
         .unwrap_or(false)
 }
 
+/// The batch "tick the old ones" stands for: every listed target that is past
+/// the keep threshold by the same test as the RECENT badge. It only names
+/// positions; ticking them changes a selection and nothing else.
+pub fn old_targets(targets: &[TargetDir], empty: &HashSet<usize>, max_age_days: u64) -> HashSet<usize> {
+    (0..targets.len())
+        .filter(|index| !empty.contains(index) && !is_recent(&targets[*index], max_age_days))
+        .collect()
+}
+
 /// Nothing is checked after a scan. Deleting here is irreversible and skips the
 /// Trash, so a popover that opens already armed to delete is not a default
 /// anyone should be handed — the user opts in, per row or per group.
@@ -195,5 +204,23 @@ mod tests {
         let measured = HashSet::from([0, 2]);
         assert_eq!(empty_measured(&targets, &measured), HashSet::from([0]));
         assert_eq!(settled_order(&targets, &measured), vec![2, 1]);
+    }
+
+    /// Ticking the old batch takes exactly the targets past the threshold:
+    /// none that are recent, and none the list has dropped as empty.
+    #[test]
+    fn the_old_batch_is_exactly_the_targets_past_the_threshold() {
+        use std::time::{Duration, SystemTime};
+        let at = |days: u64| TargetDir {
+            path: std::path::PathBuf::from(format!("/w/{days}/target")),
+            size_bytes: 1,
+            last_modified: SystemTime::now() - Duration::from_secs(days * 86_400 + 60),
+            kind: wd40::scanner::ArtifactKind::RustTarget,
+        };
+        let targets = [at(0), at(6), at(7), at(8), at(400), at(90)];
+        let empty = std::collections::HashSet::from([5]);
+        let old = super::old_targets(&targets, &empty, 7);
+        assert_eq!(old, std::collections::HashSet::from([2, 3, 4]));
+        assert!(old.iter().all(|index| !super::is_recent(&targets[*index], 7)));
     }
 }
